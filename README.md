@@ -51,9 +51,27 @@ deletes the database without opening it, so it works even when the file is
 corrupt, and it removes any `-journal`/`-wal`/`-shm` sidecar left behind by a
 crashed write.
 
+A cache that is merely **in use** by another `trackiwi` is reported as such —
+`local cache is in use (...): database is locked` — and the advice is to wait
+and re-run. That message never mentions `purge`, because nothing is wrong with
+the data. Only a genuinely corrupt cache (`local cache is corrupt (...)`) tells
+you to run `purge --yes`, which there is the only remedy.
+
+Piping an export into a reader that stops early (`trackiwi export --format csv
+| head`) exits `0`: the reader took what it wanted. Every other command treats
+a dead output stream as the failure it is — `trackiwi sync 2>&1 | head -1`
+exits non-zero, because a sync that stopped after its first page has not
+finished. Re-run it; it resumes.
+
 The API base must be `https://` — both `--api-base` and the server address the
 login response hands back are rejected otherwise, since a plain-HTTP base
-would send the bearer token in cleartext.
+would send the bearer token in cleartext. The same check applies to the value
+stored in `~/.config/trackiwi/config.json`, so a hand-edited or migrated
+config with an `http://` base fails every authenticated command with
+`the API base must start with https:// — ... run 'trackiwi login' again`.
+`logout` is the exception: it cannot revoke over such a base (that would send
+the token in cleartext), so it removes the local credentials and warns that
+the token may still be live and has to be revoked in the app.
 
 Rows that cannot be trusted are skipped and counted rather than stored: a row
 with the wrong number of fields, a missing id/tracker/timestamp/coordinate, a
@@ -136,7 +154,7 @@ of the command. This is the same credential that grants live location. Use
 the history file nor `argv`, and on a terminal the prompt does not echo.
 
 `logout` revokes the session server-side before deleting the local copy;
-deleting a local copy of a still-valid token would be fake security. If revocation fails (network or server error), the local credentials are still removed and the token may remain valid until revoked in the app.
+deleting a local copy of a still-valid token would be fake security. If revocation fails (network or server error), the local credentials are still removed and the token may remain valid until revoked in the app. The same applies when the stored API base is unusable (an `http://` value in a hand-edited config): `logout` still removes the credentials rather than leaving a token that cannot be deleted with the tool, and says on stderr that it must be revoked in the app.
 
 **Never share a trackiwi URL containing a `token=` parameter.** Their app
 accepts `?token=...&apibase=...` for auto-login, so such a link hands over full

@@ -28,14 +28,50 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   and `AuthError` live in `trackiwi/__init__.py` with the package's other
   shared contracts (`__version__`, `COLUMNS`), so neither `client.py` nor
   `store.py` imports the other to reach them.
+  `client.InsecureApiBaseError` is a private `TrackiwiError` subclass, not a
+  third member of spec §8's taxonomy: same message, same exit code, not
+  exported from `__init__.py`. It exists so `cmd_logout` can tell "the stored
+  API base cannot carry a request" apart from every other `TrackiwiError`.
+- **Validate config *values*, not only the document.** `Client.load` checks
+  `isinstance(data, dict)` *and* that `api_base` is a string or `None`: a
+  non-string value reached `_require_https`'s `.lower()` and escaped `main()`
+  as an `AttributeError`, one line past the check meant to prevent that.
+- **A stored token must always be removable.** `logout` is the only revocation
+  path (spec §7.3), so it must not be blockable by the config file's own
+  contents. When the stored `api_base` fails validation, `cmd_logout` falls
+  back to `Client.forget_local_session()` and warns on stderr. It does *not*
+  revoke over that base: sending the token in cleartext is exactly what
+  `_require_https` prevents.
+- **`BrokenPipeError` means success only where the payload is written.** It is
+  caught in `cmd_export` around `sys.stdout.write` (`export | head` is not an
+  error); `main()` catches it too but exits **1**, because `cmd_sync` writes
+  its progress to stderr and `sync 2>&1 | head -1` returning 0 made a
+  wrapper's `sync && export` run on a partial sync. `_silence_stderr()` is the
+  shared devnull redirect that keeps CPython's flush-on-exit quiet.
 - **A malformed field means "skip and count the row", never "crash" and never
   "store it anyway".** Non-finite coordinates and timestamps outside
   `_MIN_FIX_AT.._MAX_FIX_AT` are malformed: `inf` produced schema-invalid GPX
   and invalid JSON, and an out-of-range `fix_at` crashed *every* later export.
+  The exporters are the second layer, for rows already cached before those
+  checks existed: `to_gpx` (`_finite`) and `to_geojson` (`allow_nan=False`)
+  both raise, and `cmd_export` converts it. `to_csv` deliberately does not —
+  it is a raw dump of the cache. A comment must not claim wider coverage than
+  that.
 - **Read-only commands must not create the cache.** `export` and `purge` touch
   the database only when it already exists; `purge` unlinks it (plus any
-  `-journal`/`-wal`/`-shm`) without opening it, so it still works on a corrupt
-  file — which is exactly when a user wants the history gone.
+  `-journal`/`-wal`/`-shm`, via `store.cache_files`, which `Store.purge()`
+  shares so the library makes the same promise) without opening it, so it
+  still works on a corrupt file — which is exactly when a user wants the
+  history gone.
+- **Only a *corrupt* cache may be told to run `purge --yes`.** `purge` is
+  unconditionally destructive, so advising it on an intact database destroys
+  the one asset spec §7.1 protects. `Store._open_failure` splits the cases: a
+  locked/busy `sqlite3.OperationalError` is transient (a concurrent or hung
+  `trackiwi`) and gets a "wait and re-run" message that never says purge;
+  everything else keeps the purge advice, because there it is the only remedy.
+  `sqlite3.OperationalError` is a subclass of `sqlite3.DatabaseError`, so the
+  lock check must come first. Both messages carry the sqlite text — without it
+  the two cases are indistinguishable from CLI output.
 - **An export covering several trackers must keep them apart** — one `<trk>`
   per tracker, one GeoJSON `Feature` per tracker with `tracker_id` in
   `properties`. A fused track renders as a plausible line, so the error cannot
