@@ -57,10 +57,20 @@ class Store:
         self._conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> Store:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
+        # Create the file at 0600 *before* sqlite3 can create it at the umask
+        # default: the cache is a movement history, and a chmod after the fact
+        # leaves a window in which another local process can open it and keep
+        # the descriptor. The descriptor is closed immediately; sqlite3 opens
+        # its own. O_CREAT's mode applies to a new file only, so the chmod
+        # below still does the steady-state self-heal for an existing file.
+        try:
+            os.close(os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600))
+            os.chmod(self.path, 0o600)
+        except OSError as error:
+            raise TrackiwiError(f"cannot open local cache ({self.path}): {error}") from error
         conn = sqlite3.connect(self.path)
-        os.chmod(self.path, 0o600)
         try:
             conn.row_factory = sqlite3.Row
             conn.executescript(_SCHEMA)

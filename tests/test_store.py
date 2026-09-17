@@ -105,6 +105,23 @@ def test_failed_batch_is_rolled_back(tmp_path):
         assert s.count() == 0
 
 
+def test_database_is_created_owner_only_without_relying_on_chmod(tmp_path, monkeypatch):
+    """The cache used to be created by `sqlite3.connect` at the umask default
+    (0644 under the usual umask, 0666 under a permissive one) and narrowed
+    only afterwards. With `os.chmod` disabled, only a create-time mode can
+    produce 0600."""
+    monkeypatch.setattr(os, "chmod", lambda *args, **kwargs: None)
+    previous = os.umask(0)
+    try:
+        path = tmp_path / "sub" / "positions.db"
+        with Store(path) as s:
+            s.upsert([row(1)])
+    finally:
+        os.umask(previous)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
+
+
 def test_corrupt_database_becomes_a_trackiwierror_naming_the_way_out(tmp_path):
     """A non-database file at the cache path used to raise
     `sqlite3.DatabaseError`, which `main()` does not catch: export, sync and

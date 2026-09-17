@@ -6,6 +6,7 @@ SQLite or output formats.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
@@ -199,6 +200,13 @@ class Client:
         path = default_config_path()
         if not path.exists():
             return cls(opener=opener)
+        # Steady-state self-heal, mirroring Store.__enter__: a config file
+        # widened after login (restored from a backup, copied with `cp`, synced
+        # by a dotfile manager) is narrowed back here, since `save()` normally
+        # runs only once. A chmod we are not allowed to perform must not stop
+        # the session from loading.
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -215,11 +223,23 @@ class Client:
         )
 
     def save(self) -> None:
-        """Persist the session owner-only. The password is never stored."""
-        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        """Persist the session owner-only. The password is never stored.
+
+        The directory and the file are created *at* their final mode, not
+        widened-then-narrowed: `write_text` plus a follow-up `chmod` left a
+        window (0644 under the usual umask, 0666 under a permissive one) in
+        which another local process could open the token file and keep the
+        descriptor — a later chmod does not revoke an open fd.
+        """
+        self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.config_path.parent, 0o700)
         payload = {"api_base": self.api_base, "token": self.token, "user_id": self.user_id}
-        self.config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        text = json.dumps(payload, indent=2) + "\n"
+        fd = os.open(self.config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        # O_CREAT's mode applies to a new file only, so an existing config
+        # file (or one created under a narrower umask) still gets chmod'ed.
         os.chmod(self.config_path, 0o600)
 
     def _request(

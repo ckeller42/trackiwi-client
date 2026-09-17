@@ -157,6 +157,47 @@ def test_session_ok_propagates_non_auth_errors():
         Client.load(opener=opener).session_ok()
 
 
+# --- 0600 on every path, not only after a follow-up chmod ---
+
+
+@pytest.fixture
+def no_chmod_and_open_umask(monkeypatch):
+    """Neutralise the post-hoc `os.chmod` and widen the umask.
+
+    `save()` used to create the file at the umask default and narrow it
+    afterwards, leaving a window in which another local process could open the
+    token file (and keep the descriptor after the chmod). With `os.chmod`
+    disabled, only a create-time mode can produce 0600, so this fixture makes
+    the test discriminating rather than decorative.
+    """
+    monkeypatch.setattr(os, "chmod", lambda *args, **kwargs: None)
+    previous = os.umask(0)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+def test_config_is_created_owner_only_without_relying_on_chmod(no_chmod_and_open_umask):
+    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
+    path = default_config_path()
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
+
+
+def test_load_self_heals_a_widened_config(tmp_path):
+    """`Store.__enter__` chmods 0600 on every entry; `Client.load()` did not,
+    so a config file widened after login (a backup restore, a `cp`, a dotfile
+    manager) stayed world-readable forever and nothing noticed."""
+    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
+    path = default_config_path()
+    os.chmod(path, 0o644)
+
+    assert Client.load().token == "tok"
+
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
 # --- Boundary conversion: no exception class may escape as a raw traceback ---
 
 
