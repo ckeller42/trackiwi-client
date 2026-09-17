@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -38,6 +39,23 @@ def _by_tracker(rows: Sequence) -> dict:
     return grouped
 
 
+def _finite(row) -> tuple[float, float]:
+    """Return `(latitude, longitude)`, rejecting a non-finite pair.
+
+    A coordinate is checked at parse time, so this only ever fires for a row
+    that reached the cache *before* that check existed — a real population,
+    since the client has been runnable throughout. `inf` is not a valid
+    `xsd:decimal`, so `f"{inf:.6f}"` produced `lat="inf"`: schema-invalid GPX,
+    written silently with exit 0. GeoJSON already refused such a row
+    (`allow_nan=False`), and `cmd_export` converts the `ValueError` into a
+    clean message, which is what its own comment claims for both formats.
+    """
+    latitude, longitude = row["latitude"], row["longitude"]
+    if not math.isfinite(latitude) or not math.isfinite(longitude):
+        raise ValueError(f"non-finite coordinate in cached row {row['id']}")
+    return latitude, longitude
+
+
 def to_gpx(rows: Sequence) -> str:
     """Render rows as GPX 1.1 with one `<trk>` per tracker."""
     gpx = ET.Element(
@@ -49,10 +67,9 @@ def to_gpx(rows: Sequence) -> str:
         ET.SubElement(trk, "name").text = f"tracker {tracker_id}"
         seg = ET.SubElement(trk, "trkseg")
         for row in tracker_rows:
+            latitude, longitude = _finite(row)
             point = ET.SubElement(
-                seg,
-                "trkpt",
-                {"lat": f"{row['latitude']:.6f}", "lon": f"{row['longitude']:.6f}"},
+                seg, "trkpt", {"lat": f"{latitude:.6f}", "lon": f"{longitude:.6f}"}
             )
             if row["altitude"] is not None:
                 ET.SubElement(point, "ele").text = str(row["altitude"])

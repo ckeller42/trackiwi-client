@@ -167,3 +167,14 @@ def test_geojson_refuses_to_emit_non_finite_coordinates():
 
 def test_formats_registry_exposes_all_three():
     assert set(FORMATS) == {"gpx", "geojson", "csv"}
+
+
+def test_gpx_refuses_to_emit_non_finite_coordinates():
+    """`inf` in a cache written before the parse-time finiteness check produced
+    `<trkpt lat="inf">` — not a valid `xsd:decimal`, and emitted silently with
+    exit 0. GeoJSON already failed loudly; GPX has to as well, because that is
+    what `cmd_export`'s boundary conversion claims to catch."""
+    with pytest.raises(ValueError, match="non-finite"):
+        to_gpx([row(1, lat=float("inf"))])
+    with pytest.raises(ValueError, match="non-finite"):
+        to_gpx([row(1, lon=float("nan"))])

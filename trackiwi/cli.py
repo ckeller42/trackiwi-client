@@ -207,9 +207,12 @@ def cmd_export(args: argparse.Namespace) -> int:
         text = FORMATS[args.format](rows)
     except (ValueError, OverflowError, OSError) as error:
         # The exporters are pure, so they raise plain exceptions: a `fix_at`
-        # outside `datetime`'s range or a non-finite coordinate cached before
+        # outside `datetime`'s range, or a non-finite coordinate, cached before
         # those were rejected at parse time. Convert at this boundary rather
-        # than letting it escape main() as a traceback.
+        # than letting it escape main() as a traceback. Both schema-bearing
+        # formats raise on a non-finite coordinate (GPX since `lat="inf"` is
+        # not a valid `xsd:decimal`, GeoJSON since `Infinity` is not valid
+        # JSON); `csv` is a raw dump of the cache and passes the value on.
         raise TrackiwiError(f"cached data cannot be exported: {error}") from error
     if args.output:
         _write_atomically(args.output, text)
