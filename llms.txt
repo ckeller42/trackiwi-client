@@ -3,8 +3,9 @@
 > Unofficial, read-only Python client (library + CLI) for pulling one person's
 > own GPS data out of a personal [trackiwi](https://www.trackiwi.com) account:
 > sync positions into a local SQLite cache and export them as GPX, GeoJSON or
-> CSV. Zero runtime dependencies — standard library only. Unaffiliated with
-> trackiwi; it talks to the private API the vendor's own app uses.
+> CSV. Zero runtime dependencies — standard library only. MIT-licensed (see
+> LICENSE). Unaffiliated with trackiwi; it talks to the private API the vendor's
+> own app uses.
 
 ## Overview
 
@@ -23,6 +24,11 @@
 - [CLAUDE.md](CLAUDE.md): contributor rules, invariants verified against the live
   API, and repo/CI setup.
 - [SECURITY.md](SECURITY.md): what is sensitive and how to report a concern.
+- [Requirements & traceability](docs/requirements.rst): every requirement as a
+  `sphinx-needs` object, each traced to its verifying test in
+  [docs/traceability.rst](docs/traceability.rst); the docs build fails in CI if
+  any requirement has no verifying test.
+- [LICENSE](LICENSE): MIT.
 
 ## Module map (hard boundaries)
 

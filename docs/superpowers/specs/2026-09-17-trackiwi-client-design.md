@@ -536,10 +536,13 @@ Set up per the `github-project-setup` house style:
   minor/patch bumps only
 - `CLAUDE.md` at the repository root recording the PR workflow, the gate
   command, and the no-private-data rule
-- Badge row: CI and language now; the licence badge is added together with the
-  licence itself, which is chosen when the repository is published rather than
-  while it is private
+- Badge row: CI, language and licence (MIT). The project is MIT-licensed
+  (`LICENSE` at the repository root, wired into `pyproject.toml`); the badge
+  sits with the others in the README
 
-Sphinx documentation and GitHub Pages are **deferred**: Pages on a private
-repository requires a paid plan. Both are added when the repository is
-published. Until then the README is the documentation.
+The Sphinx **build** runs in CI now: a `sphinx-needs` requirements-traceability
+build that fails (under `sphinx-build -W`) if any requirement lacks a verifying
+test, on every push and pull request. Only **GitHub Pages hosting** of its HTML
+output is **deferred** — Pages on a private repository requires a paid plan — so
+hosting is enabled when the repository is published. Until then the README is
+the end-user documentation and the traceability build runs as a gate only.

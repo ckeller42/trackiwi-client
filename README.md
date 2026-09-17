@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml/badge.svg)](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Read-only Python client for pulling positions out of a personal
 [trackiwi](https://www.trackiwi.com) account: sync them into a local SQLite
@@ -263,3 +264,23 @@ No private data may enter this repository. A pre-commit hook blocks databases,
 track exports outside `tests/fixtures/synthetic-*`, credential files and
 token-shaped strings; `.gitignore` and CI enforce the same rules independently.
 Test fixtures are synthetic: invented coordinates, invented IDs.
+
+### Requirements & traceability
+
+Every project requirement is a first-class `sphinx-needs` object under `docs/`
+(`docs/requirements.rst`), each traced to the test(s) that verify it
+(`docs/traceability.rst`). The docs build **fails** if any requirement has no
+verifying test, so it runs as a CI gate — only its GitHub Pages hosting is
+deferred until the repo is public. Build it locally with:
+
+```bash
+.venv/bin/sphinx-build -b html -W docs docs/_build/html
+```
+
+`./tools/ci.sh` also runs this build, the pure-function doctests
+(`pytest --doctest-modules trackiwi`) and the `interrogate` docstring-coverage
+gate, alongside the test suite and coverage.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

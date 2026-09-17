@@ -97,8 +97,30 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   apply the moment the repo goes public or the plan changes.
 - Do not self-merge past unresolved CodeRabbit threads.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
-- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` and `pytest`
-  with coverage, mirroring CI exactly.
+- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files`, `pytest`
+  with coverage, the pure-function doctests, the `sphinx-build -W`
+  traceability build and `interrogate`, mirroring CI exactly.
+- **Requirements live as `sphinx-needs` objects in `docs/`.** Each requirement
+  is a `.. req::` with a stable `REQ_*` id in `docs/requirements.rst`; the
+  implementing function's docstring references it the sphinx way
+  (`Implements :need:\`REQ_…\`.`); and `docs/traceability.rst` has a `.. test::`
+  need that `:verifies:` it, naming the real test node id(s). **New code must
+  add a requirement and a verifying `.. test::` — the docs build FAILS
+  otherwise**: `conf.py`'s `req_without_test` rule flags any `req` with no
+  incoming `verifies` link, and `sphinx-build -b html -W` (the `-W` is
+  load-bearing) turns that, and any unresolved `:need:`, into a non-zero exit.
+  Use `needs_links` (not the deprecated `needs_extra_links`) for the pinned
+  `sphinx-needs==8.5.0`. Build locally:
+  `.venv/bin/sphinx-build -b html -W docs docs/_build/html` (output is
+  gitignored; only Pages *hosting* is deferred until public).
+- **Doctests run on the pure functions only** (`export.*`, `normalize_epoch`,
+  `epoch_from_iso`, `parse_positions`), via `pytest --doctest-modules trackiwi`
+  in `ci.sh`. Never add a doctest to network/filesystem/non-deterministic code,
+  and use synthetic values only.
+- **Docstring coverage** is gated by `interrogate` (`[tool.interrogate]` in
+  `pyproject.toml`, `fail-under = 100` on the public surface with dunder/init/
+  nested/private ignored). Cover new public API with a docstring or the gate
+  fails.
 - **Coverage gate:** `pytest --cov=trackiwi --cov-fail-under=95` in both CI and
   `ci.sh`. Measured coverage is ~97%; the threshold is 95 (headroom for matrix
   variance). `[tool.coverage.*]` config lives in `pyproject.toml`.
@@ -114,22 +136,23 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 
 ## Repo / CI setup
 
-- GitHub: `ckeller42/trackiwi-client`, **private**. A licence, and the GitHub
-  *Pages hosting* of the docs, are deferred until the repo is made public
-  (Pages on a private repo needs a paid plan). **Sphinx itself is not
-  deferred** — a `sphinx-needs` requirements-traceability build is being added
-  in a follow-up pass and will run in CI; only the public hosting of its output
-  waits.
+- GitHub: `ckeller42/trackiwi-client`, **private**. The GitHub *Pages hosting*
+  of the docs is deferred until the repo is made public (Pages on a private
+  repo needs a paid plan). **Sphinx itself is not deferred** — the
+  `sphinx-needs` requirements-traceability build runs in CI now; only the
+  public hosting of its output waits. The project is **MIT-licensed**
+  (`LICENSE` at the repo root, wired into `pyproject.toml` via
+  `license = "MIT"` / `license-files`, with the badge in the README).
 - **Public-flip checklist** (do these the moment the repo goes public or the
   plan changes — one place so it is a checklist, not a rediscovery):
   1. Enable the branch-protection ruleset (payload already below in this
      section — apply it verbatim).
   2. Enable GitHub Pages to **publish** the Sphinx docs (the build already runs
      in CI; only hosting was blocked).
-  3. Add a `LICENSE` (chosen at publish time) and the licence badge to the
-     README badge row.
-  4. Enable GitHub-native secret scanning + push protection if the plan allows
+  3. Enable GitHub-native secret scanning + push protection if the plan allows
      — it complements the `detect-secrets` hook and the local guard.
+  (The MIT `LICENSE` and its badge are already in place, so they are no longer
+  on this checklist.)
 - Branch protection on `main`: **NOT active, and cannot be.** Both APIs that
   could enforce it were tried and both return the same thing on a private
   repo on the free plan:
