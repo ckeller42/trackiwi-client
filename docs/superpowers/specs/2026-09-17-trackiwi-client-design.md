@@ -144,6 +144,73 @@ Responses may carry a `trackiwi-app-command` header, which the official client
 delivered by a server we do not control is not acceptable in a tool that has
 filesystem access.
 
+### 3.6 Verified against the live API (2026-09-17)
+
+Everything above this subsection is *static analysis* of the vendor's app
+bundle. Everything in it was **observed in a real response** from a real
+account on 2026-09-17, and therefore supersedes the inferences above where the
+two disagree.
+
+Scope note: this subsection records that the five read-only list endpoints of
+§3.4 (`/api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
+`/api/v2/alarms`, `/api/v2/shares`) are now **implemented, read-only**. That
+supersedes their listing as out of scope in §3.4 and in §1's non-goals, which
+have not been rewritten here because this subsection's edit was the only one
+authorised. The write/mutation routes in §3.4 remain out of scope permanently
+(see §7.5).
+
+1. **`distance` is centimetres, and it is a per-fix delta — not an odometer.**
+   The field divided by the haversine distance between consecutive fixes is
+   100.00 across 12 consecutive samples (99.98 … 100.03). One sample read
+   80.88, which says the value is reported by the *device* from its own
+   consecutive readings rather than derived server-side from the stored
+   coordinates — so it can legitimately disagree with a two-point calculation
+   when a fix is dropped or GPS jitters. Do not treat it as a cumulative
+   total, and do not expect it to reconcile exactly with the coordinates.
+2. **`voltage` is centivolts.** A reading of `1303` is 13.03 V — a charging
+   12 V system. Same hundredths convention as `distance`.
+3. **`fix_timezone` is an INTEGER, not a string.** Observed value: `1`. It is
+   never a zone name such as `"UTC"`. The parser already required this (the
+   field goes through `int()`) and the cache schema in §5 already declares the
+   column `INTEGER`, so nothing needed changing; it is now pinned by a test
+   that walks a row parse → store → CSV export.
+4. **`fix_at` has two different types on two endpoints.**
+   - In the **sync CSV**: an epoch integer in **seconds** (observed
+     `1766663018`). This resolves §10.5's unit question.
+   - On **`GET /api/v2/trackers`**, inside `latest_positionlog`: an **ISO 8601
+     string** (observed `'2026-09-17T19:19:59Z'`). `received_at` is likewise an
+     ISO string.
+
+   The client therefore has two converters, not one: `normalize_epoch` for the
+   numeric form and `epoch_from_iso` for the ISO form. They are deliberately
+   separate rather than one `int | str` function, because a digit string such
+   as `"1766663018"` is ambiguous between the two and no caller actually needs
+   the ambiguity — each one knows which endpoint it read.
+5. **A sync page is 20,000 rows.** The account observed held 62,361 positions,
+   so an initial sync is four pages.
+6. **`GET /api/v2/session`** returns `{"token": ..., "user": {...}}`, where
+   `user` holds only `id`, `created_at` and `updated_at` — **no email
+   address**. §3.2's claim that `user` carries `is_tester` and
+   `early_access_features[]` is the *login* response's shape, not this one.
+7. **Tracker records carry `alarm_configuration`**, which includes a geofence
+   alarm with `lat`/`long`/`radius`. **`GET /api/v2/trackers` output therefore
+   contains location data, not merely device metadata** — a geofence centre is
+   usually where the vehicle is kept. It must be treated with the care §7.1
+   demands of the position cache, not as an inventory listing.
+8. **Tracker records also carry** `installed_at`, `membership_valid`,
+   `membership_ends_at` and `prunable_at`. The last reads as the vendor's own
+   data-retention horizon for the account's history, which is an argument for
+   keeping a local cache rather than relying on the server.
+
+Also observed, and the reason the `alarms` command carries a privacy warning:
+each alarm record's `event` object embeds `latitude`/`longitude`, so
+`GET /api/v2/alarms` is itself a **location history** — and for a theft or
+geofence alarm, precisely the locations worth protecting.
+
+`markers` and `shares` both answered 200 with an **empty list** on the account
+checked, so their element shape remains **unverified**. The client returns the
+parsed list and promises no field for them.
+
 ## 4. Architecture
 
 Four modules, no runtime dependencies. Python standard library only: `urllib`,
@@ -392,19 +459,51 @@ exactly.
 
 ## 10. Open questions
 
-Resolved during implementation against live responses, not guessed:
+Resolved during implementation against live responses, not guessed. Items
+marked **ANSWERED** were settled on 2026-09-17; see §3.6 for the evidence.
+They are kept rather than deleted, so that a later reader can see what was
+once unknown and on what basis it was closed.
 
-1. The exact meaning of HTTP **409** on login.
+1. The exact meaning of HTTP **409** on login. **Still open** — not reproduced
+   on a healthy account, and deliberately not provoked.
 2. Token lifetime, and whether `/api/login/refresh` is required in practice.
-3. The JSON shape of `GET /api/v2/trackers`.
+   **Still open.**
+3. The JSON shape of `GET /api/v2/trackers`. **ANSWERED: a bare JSON list**,
+   not a `{"data": [...]}` envelope — as for all five of the other read-only
+   list endpoints. The client nevertheless still accepts the envelope as a
+   fallback: this is one account on one day against an undocumented API with
+   no deprecation policy (§2), so the branch stays. Record *contents* are in
+   §3.6, items 7 and 8, and they include location data.
 4. Whether `trackiwi-position-count` is returned on incremental syncs or only on
-   the initial one.
-5. The unit of `fix_at` — epoch **seconds** or milliseconds — and the exact
-   semantics of `fix_timezone` (offset in minutes, presumably). Both are
-   required before timestamps can be written correctly into GPX, so they must be
-   confirmed against a live response rather than assumed.
-6. The units of `speed` (km/h or m/s), `altitude` (m) and `distance`
-   (cumulative or per-fix), which affect GPX/GeoJSON output fidelity.
+   the initial one. **Still open** — the header was present on the sync
+   observed, but that does not distinguish the two cases. The client already
+   treats it as optional.
+5. The unit of `fix_at`. **ANSWERED: epoch seconds** in the sync CSV (observed
+   `1766663018`) — and, separately, an **ISO 8601 string** inside
+   `latest_positionlog` on `GET /api/v2/trackers` (observed
+   `'2026-09-17T19:19:59Z'`), which the question did not anticipate. See §3.6
+   item 4. `fix_timezone`'s **type** is also ANSWERED: an integer, observed
+   `1`, never a string (§3.6 item 3). Its exact **semantics** remain open —
+   `1` is consistent with hours (CET) and inconsistent with the minutes guess
+   in the original question, but a single sample from a single zone cannot
+   distinguish "hours" from "an index" or "something else". Nothing in the
+   client depends on the interpretation: the value is stored and exported
+   verbatim, and all timestamps are handled in UTC.
+6. The units of `speed` (km/h or m/s), `altitude` (m) and `distance`.
+   **`distance` is ANSWERED: centimetres, and a per-fix delta rather than an
+   odometer** (§3.6 item 1). **`voltage` is ANSWERED: centivolts** (§3.6 item
+   2), which was not part of the original question. `speed` and `altitude`
+   remain **open**: no ground truth was available to calibrate them against,
+   and the exporters do not depend on either (GPX carries `altitude` through
+   as-is and omits `speed`).
+7. Whether the sync `offset` parameter is **exclusive**. **Still open, and
+   deliberately left so** — see CLAUDE.md, "Known unknown: offset semantics in
+   `sync`". `Client.sync()` assumes exclusivity, which is inferred from the
+   vendor's own web app rather than measured. A third-party claim that this
+   was confirmed live arrived during implementation but could not be verified
+   here (no live request was made, per the implementation brief), and it cited
+   real position ids that must not enter this repository, so the question is
+   recorded as open. The strict-monotonicity guard in `sync` stays.
 
 ## 11. Repository and CI
 

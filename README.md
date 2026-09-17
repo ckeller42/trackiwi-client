@@ -33,6 +33,64 @@ trackiwi logout                  # revokes the session server-side
 trackiwi purge --yes             # delete the local cache
 ```
 
+### Listing the rest of your account
+
+```bash
+trackiwi tours                  # recorded tours
+trackiwi alarms                 # alarms — see the warning below
+trackiwi markers                # markers
+trackiwi marker-categories      # marker categories
+trackiwi shares                 # active share links
+```
+
+Each prints one tab-separated line per record, like `trackers` does, so the
+output pipes into `cut`, `sort` or `awk`. A field the API does not send prints
+as `-`. These are live reads and are **not** cached: the local database is for
+positions only, and none of these commands creates or touches it.
+
+**`trackiwi alarms` output is location history.** Every alarm record carries an
+`event` object embedding latitude and longitude, so the alarm list says where
+the vehicle was each time an alarm fired — which for a theft or geofence alarm
+is precisely the locations you would want to protect. The command deliberately
+prints only id, tracker, type, acknowledged and timestamp, so merely checking
+what fired does not put coordinates into your scrollback; but the API response
+itself holds them, so treat it like the cache. `trackiwi alarms --help` repeats
+this.
+
+**`trackiwi trackers` output also contains location data**, which the name does
+not suggest: each tracker record carries an `alarm_configuration` with a
+geofence `lat`/`long`/`radius` — usually where the vehicle is kept — and the
+latest fix. The command itself prints only id and name.
+
+`markers` and `shares` have an **unverified record shape**: both endpoints
+answered with an empty list on the account this was checked against, so their
+field names are an expectation rather than a confirmed contract. Their
+`--help` says so.
+
+All five are read-only, like the rest of the tool. `shares` lists share links;
+it cannot create or revoke one.
+
+Timestamps in these listings are printed exactly as the API sends them, which
+for these endpoints is an ISO 8601 string — *not* the epoch integer the
+position sync uses. Both forms occur in this API and mean the same kind of
+thing; see the units note below.
+
+### Field units
+
+Worth knowing before you do arithmetic on an export, because the field names
+do not say it and the vendor documents nothing:
+
+- **`distance` is centimetres**, and it is a **per-fix delta, not an
+  odometer**. It is reported by the device from its own consecutive readings,
+  so it can disagree slightly with the distance you would compute from two
+  stored coordinates when a fix was dropped or GPS jittered.
+- **`voltage` is centivolts** — `1303` means 13.03 V.
+- **`fix_timezone` is an integer offset**, not a zone name. Its exact
+  interpretation is unconfirmed; nothing in this tool depends on it, because
+  every timestamp is handled and exported in UTC.
+- **`speed` and `altitude` units are unconfirmed.** They are passed through
+  unchanged rather than converted to something that might be wrong.
+
 `--from`/`--to` are inclusive UTC calendar days (`YYYY-MM-DD`); giving a `--to`
 before `--from` is rejected with an error rather than silently returning
 nothing. `--format` is required and one of `gpx`, `geojson` or `csv`; add

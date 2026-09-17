@@ -202,6 +202,55 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   actual value in that case.
 - `fix_at` is normalised to epoch seconds at parse time. Nothing downstream
   should handle milliseconds.
+- **Unit conventions, verified live 2026-09-17 (spec §3.6).** These are not
+  guesses and they are not obvious from the field names:
+  - **`distance` is centimetres, and a per-fix delta — not an odometer.**
+    Measured at 100.00x the haversine distance between consecutive fixes over
+    12 samples. It comes from the *device's* own consecutive readings, not from
+    the stored coordinates, so it can legitimately disagree with a two-point
+    calculation when a fix drops or GPS jitters. Do not "fix" that disagreement.
+  - **`voltage` is centivolts** — `1303` is 13.03 V. Same hundredths
+    convention.
+  - **`fix_timezone` is an integer** (observed `1`), never a zone name like
+    `"UTC"`. The parser enforces it (`int()`), the schema declares `INTEGER`,
+    and a test pins the chain parse → store → CSV. Its *semantics* are still
+    open; nothing depends on them, because everything is handled in UTC.
+  - **`speed` and `altitude` units are still unverified.** Do not document a
+    unit for either.
+- **`fix_at` has two types on two endpoints, and there are two functions for
+  that reason.** The sync CSV sends an **epoch integer in seconds**;
+  `GET /api/v2/trackers` sends an **ISO 8601 string** inside
+  `latest_positionlog` (`received_at` likewise). `normalize_epoch` takes the
+  int, `epoch_from_iso` takes the string. **Do not merge them into one
+  `int | str` function**: `"1766663018"` is a digit string that is also a
+  plausible epoch, so a union-typed normaliser has to guess which form the
+  caller meant, and no caller needs the ambiguity — each knows which endpoint
+  it read. Their error handling differs too, which is the harder reason: a bad
+  CSV field raises `ValueError` so `parse_positions` can skip and count the
+  row, whereas a bad JSON field has no row to skip and converts to
+  `TrackiwiError` at the boundary. `epoch_from_iso` reads a zone-less value as
+  **UTC** on purpose — naive `.timestamp()` applies the *machine's* zone, which
+  would shift every exported track by the local offset.
+- **`GET /api/v2/trackers` and `GET /api/v2/alarms` both return location
+  data**, which their names do not suggest. A tracker record's
+  `alarm_configuration` holds a geofence `lat`/`long`/`radius` (usually where
+  the vehicle is kept); every alarm record's `event` embeds
+  `latitude`/`longitude`, so an alarm list is a movement record of exactly the
+  moments that mattered. The `alarms` command prints neither — a test pins
+  that — and its `--help` carries the warning. Treat both responses with the
+  care spec §7.1 demands of the cache.
+- **`POST /api/v2/session/test_alarm` must never be called or implemented.**
+  It fires a real alarm on a real vehicle. It is referenced in exactly one
+  place, a comment in `client.py` saying why not, and `grep -r test_alarm`
+  finding anything else is a regression. Same for the trailing-slash
+  item/mutation routes (`/api/v2/tours/`, `/api/v2/markers/`,
+  `/api/v2/marker_categories/`, `/api/v2/shares/`, `/api/v2/trackers/`) and
+  `PUT /api/v2/session/push_token`.
+- **The six read-only list endpoints share `Client._get_list`.** Do not
+  reimplement the GET/`_check`/decode/insist-on-a-list sequence per method; six
+  copies is how the envelope handling drifts. None of them is cached in SQLite,
+  deliberately: they are small live reads and the cache exists for positions
+  only.
 - **`*.json` and `*.xml` are gitignored as track exports**, because
   `export --format geojson -o positions.json` is the natural filename and a
   GPX saved as `track.xml` is the same hole. A legitimate JSON/XML file needs
