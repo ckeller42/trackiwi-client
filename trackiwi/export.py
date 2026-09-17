@@ -22,33 +22,56 @@ def _iso(fix_at: int) -> str:
     return datetime.fromtimestamp(fix_at, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _by_tracker(rows: Sequence) -> dict:
+    """Group rows by `tracker_id`, keeping each tracker's rows in input order.
+
+    An export without `--tracker` covers every tracker (design spec, section 6)
+    and `store.query()` orders by `fix_at, id`, so several devices' rows arrive
+    interleaved. Merging them into one track or one LineString would produce a
+    geometry that teleports between devices on every other point, so each
+    tracker gets its own track / feature. Group order is first appearance —
+    i.e. earliest fix — which keeps the output deterministic.
+    """
+    grouped: dict = {}
+    for row in rows:
+        grouped.setdefault(row["tracker_id"], []).append(row)
+    return grouped
+
+
 def to_gpx(rows: Sequence) -> str:
-    """Render rows as a single GPX 1.1 track segment."""
+    """Render rows as GPX 1.1 with one `<trk>` per tracker."""
     gpx = ET.Element(
         "gpx",
         {"version": "1.1", "creator": f"trackiwi-client/{__version__}", "xmlns": GPX_NS},
     )
-    trk = ET.SubElement(gpx, "trk")
-    ET.SubElement(trk, "name").text = "trackiwi export"
-    seg = ET.SubElement(trk, "trkseg")
-    for row in rows:
-        point = ET.SubElement(
-            seg,
-            "trkpt",
-            {"lat": f"{row['latitude']:.6f}", "lon": f"{row['longitude']:.6f}"},
-        )
-        if row["altitude"] is not None:
-            ET.SubElement(point, "ele").text = str(row["altitude"])
-        ET.SubElement(point, "time").text = _iso(row["fix_at"])
+    for tracker_id, tracker_rows in _by_tracker(rows).items():
+        trk = ET.SubElement(gpx, "trk")
+        ET.SubElement(trk, "name").text = f"tracker {tracker_id}"
+        seg = ET.SubElement(trk, "trkseg")
+        for row in tracker_rows:
+            point = ET.SubElement(
+                seg,
+                "trkpt",
+                {"lat": f"{row['latitude']:.6f}", "lon": f"{row['longitude']:.6f}"},
+            )
+            if row["altitude"] is not None:
+                ET.SubElement(point, "ele").text = str(row["altitude"])
+            ET.SubElement(point, "time").text = _iso(row["fix_at"])
     body = ET.tostring(gpx, encoding="unicode")
     return f'<?xml version="1.0" encoding="UTF-8"?>\n{body}\n'
 
 
 def to_geojson(rows: Sequence) -> str:
-    """Render rows as a FeatureCollection holding one Point or LineString."""
-    coordinates = [[row["longitude"], row["latitude"]] for row in rows]
+    """Render rows as a FeatureCollection with one Feature per tracker.
+
+    A tracker with a single fix becomes a `Point`, one with several a
+    `LineString`. Each Feature carries its `tracker_id` in `properties` so a
+    consumer can tell the devices apart — GPX and GeoJSON used to drop it
+    entirely, which made a multi-tracker export impossible to split up again.
+    """
     features = []
-    if coordinates:
+    for tracker_id, tracker_rows in _by_tracker(rows).items():
+        coordinates = [[row["longitude"], row["latitude"]] for row in tracker_rows]
         if len(coordinates) == 1:
             geometry = {"type": "Point", "coordinates": coordinates[0]}
         else:
@@ -58,9 +81,10 @@ def to_geojson(rows: Sequence) -> str:
                 "type": "Feature",
                 "geometry": geometry,
                 "properties": {
+                    "tracker_id": tracker_id,
                     "point_count": len(coordinates),
-                    "start_time": _iso(rows[0]["fix_at"]),
-                    "end_time": _iso(rows[-1]["fix_at"]),
+                    "start_time": _iso(tracker_rows[0]["fix_at"]),
+                    "end_time": _iso(tracker_rows[-1]["fix_at"]),
                 },
             }
         )

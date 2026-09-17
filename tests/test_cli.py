@@ -6,8 +6,8 @@ from trackiwi.cli import main
 from trackiwi.store import Store
 
 
-def row(pos_id=1, fix_at=1758000000):
-    return (pos_id, 7, fix_at, 120, 31.0, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
+def row(pos_id=1, fix_at=1758000000, tracker_id=7, lat=31.0, lon=-41.0):
+    return (pos_id, tracker_id, fix_at, 120, lat, lon, 12, 0.0, 0, 0, -71, 9, 98, 4120)
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +50,27 @@ def test_export_rejects_a_bad_date(capsys):
 def test_commands_requiring_auth_exit_2(capsys):
     assert main(["trackers"]) == 2
     assert "login" in capsys.readouterr().err
+
+
+def test_export_without_tracker_filter_keeps_the_devices_apart(capsys):
+    """The cross-module seam: `cmd_export` hands the exporters whatever
+    `store.query()` returns, which for the documented default (no `--tracker`)
+    is every tracker's rows interleaved by time."""
+    import xml.etree.ElementTree as ET
+
+    with Store() as store:
+        store.upsert(
+            [
+                row(1, fix_at=1758000000, tracker_id=101, lat=48.0, lon=9.0),
+                row(2, fix_at=1758000010, tracker_id=202, lat=20.0, lon=-80.0),
+                row(3, fix_at=1758000020, tracker_id=101, lat=48.001, lon=9.0),
+                row(4, fix_at=1758000030, tracker_id=202, lat=20.001, lon=-80.0),
+            ]
+        )
+    assert main(["export", "--format", "gpx"]) == 0
+    tree = ET.fromstring(capsys.readouterr().out)
+    ns = {"g": "http://www.topografix.com/GPX/1/1"}
+    assert len(tree.findall("g:trk", ns)) == 2
 
 
 def test_purge_deletes_the_cache(capsys):
