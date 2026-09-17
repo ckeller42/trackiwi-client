@@ -1,0 +1,37 @@
+# --- Private data: NEVER commit anything below -------------------------------
+# The position cache is a complete movement history of a physical vehicle.
+# Treat everything here as if it were a password.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+.trackiwi/
+config.json
+.env
+.env.*
+
+# Exported tracks (real coordinates). Synthetic test data lives in
+# tests/fixtures/synthetic-* and is the ONLY location allowed to hold these.
+*.gpx
+*.geojson
+*.kml
+*.csv
+!tests/fixtures/synthetic-*
+
+# --- Python ------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Editors / OS ------------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
