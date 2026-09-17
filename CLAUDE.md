@@ -156,6 +156,13 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   milliseconds), real field magnitudes, and the shape of the tracker response
   envelope (bare list vs. `{"data": [...]}`). It never runs in CI and never
   needs credentials there; it requires a real account and is opt-in only.
+
+  Note the `fix_at` symptom changed with the range check: a unit that is
+  neither seconds nor milliseconds (microseconds, say) is now *skipped* at
+  parse time, so the live test fails with `sync page ... was unparseable`
+  plus a skip count rather than printing an absurd `fix_at`. Read the raw CSV
+  body through `client._api("POST", "/api/v2/trackers/sync", ...)` to see the
+  actual value in that case.
 - `fix_at` is normalised to epoch seconds at parse time. Nothing downstream
   should handle milliseconds.
 - **`*.json` and `*.xml` are gitignored as track exports**, because

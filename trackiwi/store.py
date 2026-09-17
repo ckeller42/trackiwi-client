@@ -148,7 +148,12 @@ class Store:
         return list(self.conn.execute(sql, params))
 
     def purge(self) -> None:
-        """Close and delete the cache file."""
+        """Close and delete the cache file.
+
+        The library-level equivalent of `trackiwi purge`. The CLI deliberately
+        does *not* go through here: it unlinks the path without opening the
+        database, so that a corrupt cache can still be deleted.
+        """
         if self._conn is not None:
             self._conn.close()
             self._conn = None
