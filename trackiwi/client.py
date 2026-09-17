@@ -207,16 +207,30 @@ class Client:
         )
         _check(status, body)
         data = json.loads(body)
-        self.api_base = data["server"].rstrip("/")
-        self.token = data["token"]
-        self.user_id = data["user"]["id"]
+        try:
+            server = data["server"]
+            token = data["token"]
+            user = data["user"]
+            user_id = user["id"]
+            if (
+                not isinstance(server, str)
+                or not isinstance(token, str)
+                or not isinstance(user, dict)
+            ):
+                raise TypeError
+        except (KeyError, TypeError) as error:
+            # Never include the raw body here — a token could be in it.
+            raise TrackiwiError("unexpected login response from trackiwi") from error
+        self.api_base = server.rstrip("/")
+        self.token = token
+        self.user_id = user_id
         self.save()
-        return data["user"]
+        return user
 
     def session_ok(self) -> bool:
         try:
             status, _, _ = self._api("GET", "/api/v2/session")
-        except TrackiwiError:
+        except AuthError:
             return False
         return status < 400
 
@@ -227,3 +241,5 @@ class Client:
                 self._api("DELETE", "/api/v2/session")
         self.config_path.unlink(missing_ok=True)
         self.token = None
+        self.api_base = None
+        self.user_id = None

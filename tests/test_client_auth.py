@@ -1,11 +1,13 @@
+import io
 import json
 import os
 import stat
+import urllib.error
 
 import pytest
 from conftest import FakeOpener, FakeResponse
 
-from trackiwi.client import AuthError, Client, TrackiwiError, default_config_path
+from trackiwi.client import WEBSITE, AuthError, Client, TrackiwiError, default_config_path
 
 
 @pytest.fixture(autouse=True)
@@ -105,3 +107,60 @@ def test_session_ok_is_false_when_rejected():
     Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
     opener = FakeOpener(FakeResponse(b"", status=401))
     assert Client.load(opener=opener).session_ok() is False
+
+
+# --- Real urllib exceptions, not fake in-band statuses ------------------
+#
+# Real `urllib.request.urlopen` never *returns* a response for a non-2xx
+# status — it *raises* `urllib.error.HTTPError`. The tests above cover
+# `_check`'s status-code mapping using in-band `FakeResponse(status=...)`
+# values, but that leaves `_request`'s exception-conversion branches
+# (`HTTPError` -> status tuple, `URLError` -> `TrackiwiError`) untested.
+# These tests exercise those branches with real exception instances.
+
+
+def _http_error(status: int, body: bytes = b"") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(f"{WEBSITE}/api/login", status, "error", {}, io.BytesIO(body))
+
+
+def test_raised_http_error_401_is_converted_to_autherror():
+    opener = FakeOpener(_http_error(401, b'{"message":"nope"}'))
+    with pytest.raises(AuthError):
+        Client(opener=opener).login("a@example.invalid", "pw")
+
+
+def test_raised_http_error_503_reports_maintenance():
+    opener = FakeOpener(_http_error(503))
+    with pytest.raises(TrackiwiError, match="maintenance"):
+        Client(opener=opener).login("a@example.invalid", "pw")
+
+
+def test_raised_url_error_becomes_trackiwierror_network_error():
+    opener = FakeOpener(urllib.error.URLError("boom"))
+    with pytest.raises(TrackiwiError, match="network error"):
+        Client(opener=opener).login("a@example.invalid", "pw")
+
+
+def test_login_with_malformed_success_body_raises_trackiwierror():
+    body = json.dumps({"token": "tok", "user": {"id": 42}}).encode()  # missing "server"
+    opener = FakeOpener(FakeResponse(body))
+    with pytest.raises(TrackiwiError, match="unexpected login response"):
+        Client(opener=opener).login("a@example.invalid", "pw")
+
+
+def test_session_ok_propagates_non_auth_errors():
+    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
+    opener = FakeOpener(urllib.error.URLError("boom"))
+    with pytest.raises(TrackiwiError, match="network error"):
+        Client.load(opener=opener).session_ok()
+
+
+def test_logout_clears_api_base_and_user_id_too():
+    client = Client(opener=FakeOpener(login_response()))
+    client.login("a@example.invalid", "pw")
+    opener = FakeOpener(FakeResponse(b"", status=204))
+    client = Client.load(opener=opener)
+    client.logout()
+    assert client.token is None
+    assert client.api_base is None
+    assert client.user_id is None
