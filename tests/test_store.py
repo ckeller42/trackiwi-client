@@ -22,6 +22,15 @@ def test_upsert_then_count(store):
     assert store.count() == 2
 
 
+def test_upsert_counts_only_newly_inserted_rows(store):
+    """`upsert` used to return `len(rows)`, which `cmd_sync` reported as "N new
+    positions" — so `sync --full` over an unchanged cache claimed every
+    re-fetched row was new."""
+    assert store.upsert([row(1), row(2)]) == 2
+    assert store.upsert([row(1), row(2), row(3)]) == 1
+    assert store.upsert([row(1)]) == 0
+
+
 def test_upsert_is_idempotent(store):
     store.upsert([row(1)])
     store.upsert([row(1)])

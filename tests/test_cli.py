@@ -224,6 +224,20 @@ def test_sync_writes_batches_and_reports_counts(capsys, monkeypatch):
     assert "2 new positions, 2 cached in total" in capsys.readouterr().out
 
 
+def test_sync_does_not_report_refetched_rows_as_new(capsys, monkeypatch):
+    seed_cache()
+    batch = ([row(1), row(2, fix_at=1758000060)], 0, 2)
+    monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client([batch]))
+
+    assert main(["sync", "--full"]) == 0
+
+    out, err = capsys.readouterr()
+    assert "0 new positions, 2 cached in total" in out
+    # The progress line still reports what was fetched, which is what the
+    # server's total header is comparable with.
+    assert "synced 2 of 2 positions" in err
+
+
 def test_sync_persists_batches_before_a_later_failure(monkeypatch):
     """The resume guarantee: a batch already yielded stays durable even if a
     later page raises, so `store.max_id()` reflects it and re-running `sync`

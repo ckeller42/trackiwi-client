@@ -182,6 +182,20 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
+def _require_https(api_base: str) -> str:
+    """Return `api_base` without its trailing slash, insisting on https.
+
+    Nothing validated the scheme before, and the value arrives from two
+    untrusted-ish places: the login response's `server` field and whatever
+    `--api-base` (or a config file) says. An `http://` value would send
+    `Authorization: Bearer <token>` in cleartext on every request; this also
+    catches a typo'd `--api-base`.
+    """
+    if not api_base.lower().startswith("https://"):
+        raise TrackiwiError(f"the API base must start with https:// — got {api_base!r}")
+    return api_base.rstrip("/")
+
+
 def _decode_json(body: bytes) -> object:
     """Parse a response body, converting a non-JSON body at the boundary.
 
@@ -211,7 +225,7 @@ class Client:
         user_id: int | None = None,
         opener=None,
     ) -> None:
-        self.api_base = api_base.rstrip("/") if api_base else None
+        self.api_base = _require_https(api_base) if api_base else None
         self.token = token
         self.user_id = user_id
         self.opener = opener or urllib.request.urlopen
@@ -341,7 +355,7 @@ class Client:
         except (KeyError, TypeError) as error:
             # Never include the raw body here — a token could be in it.
             raise TrackiwiError("unexpected login response from trackiwi") from error
-        self.api_base = server.rstrip("/")
+        self.api_base = _require_https(server)
         self.token = token
         self.user_id = user_id
         self.save()

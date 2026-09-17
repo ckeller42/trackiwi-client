@@ -138,13 +138,17 @@ def cmd_sync(args: argparse.Namespace) -> int:
         raise AuthError("not logged in — run 'trackiwi login'")
     with Store() as store:
         offset = None if args.full else store.max_id()
-        written = skipped_total = 0
+        # `fetched` drives the progress line, because that is what the server's
+        # total is comparable with; `written` counts rows that were actually
+        # new, which is what gets reported at the end.
+        fetched = written = skipped_total = 0
         try:
             for rows, skipped, total in client.sync(offset=offset):
                 written += store.upsert(rows)
+                fetched += len(rows)
                 skipped_total += skipped
                 suffix = f" of {total}" if total else ""
-                print(f"\rsynced {written}{suffix} positions", end="", file=sys.stderr)
+                print(f"\rsynced {fetched}{suffix} positions", end="", file=sys.stderr)
         finally:
             # Always close the \r-progress line, success or failure, so a
             # later error message never gets appended to a partial line.

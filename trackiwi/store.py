@@ -102,12 +102,22 @@ class Store:
         return self._conn
 
     def upsert(self, rows: Iterable[tuple]) -> int:
+        """Insert or replace `rows`, returning how many were *newly inserted*.
+
+        The count is a row-count delta rather than `len(rows)`, because
+        `INSERT OR REPLACE` cannot distinguish an insert from a replace and the
+        CLI reports this number to the user as "N new positions": returning the
+        batch size made `sync --full` over an unchanged cache claim every
+        re-fetched row was new. A delta also stays correct when a batch repeats
+        an id within itself.
+        """
         placeholders = ",".join("?" * len(COLUMNS))
         sql = f"INSERT OR REPLACE INTO positions ({','.join(COLUMNS)}) VALUES ({placeholders})"
         rows = list(rows)
+        before = self.count()
         self.conn.executemany(sql, rows)
         self.conn.commit()
-        return len(rows)
+        return self.count() - before
 
     def max_id(self) -> int | None:
         return self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]

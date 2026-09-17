@@ -157,6 +157,31 @@ def test_session_ok_propagates_non_auth_errors():
         Client.load(opener=opener).session_ok()
 
 
+# --- The API base must be https, wherever it came from ---
+
+
+def test_a_plain_http_api_base_is_rejected():
+    """An `http://` base would send `Authorization: Bearer <token>` in
+    cleartext on every subsequent request."""
+    with pytest.raises(TrackiwiError, match="https"):
+        Client(api_base="http://api.example.invalid", token="tok")
+
+
+def test_a_plain_http_server_in_the_login_response_is_rejected():
+    body = json.dumps(
+        {"server": "http://api.example.invalid", "token": "tok", "user": {"id": 42}}
+    ).encode()
+    with pytest.raises(TrackiwiError, match="https"):
+        Client(opener=FakeOpener(FakeResponse(body))).login("a@example.invalid", "pw")
+    assert not default_config_path().exists()
+
+
+def test_a_saved_config_with_an_http_api_base_is_rejected():
+    _write_config('{"api_base": "http://api.example.invalid", "token": "tok", "user_id": 1}')
+    with pytest.raises(TrackiwiError, match="https"):
+        Client.load()
+
+
 # --- 0600 on every path, not only after a follow-up chmod ---
 
 
