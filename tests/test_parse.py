@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from trackiwi import COLUMNS
-from trackiwi.client import normalize_epoch, parse_positions
+from trackiwi.client import TrackiwiError, epoch_from_iso, normalize_epoch, parse_positions
 
 FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-positions.csv"
 
@@ -108,3 +108,77 @@ def test_milliseconds_are_normalised_to_seconds():
 def test_fix_at_is_normalised_during_parse():
     rows, _ = parse_positions("1,7,1758000000123,120,31.5,-41.5,1,0.0,0,0,-71,9,98,4120\n")
     assert dict(zip(COLUMNS, rows[0], strict=True))["fix_at"] == 1758000000
+
+
+# --- `fix_at` has two types on two endpoints -----------------------------
+#
+# The sync CSV sends an epoch integer in seconds; `GET /api/v2/trackers`
+# sends an ISO 8601 string inside `latest_positionlog` (`received_at` too).
+# The two forms get two functions rather than one union-typed one -- see
+# `epoch_from_iso`'s own docstring for why.
+
+
+def test_normalize_epoch_still_only_promises_the_numeric_form():
+    """The CSV path's contract is unchanged: int in, epoch seconds out."""
+    assert normalize_epoch(1758000000) == 1758000000
+    assert normalize_epoch(1758000000123) == 1758000000
+
+
+def test_epoch_from_iso_accepts_the_trailing_z():
+    """Verified on the 3.11 floor, not just on the dev interpreter:
+    `datetime.fromisoformat` parses the `Z` suffix from 3.11 onwards."""
+    assert epoch_from_iso("2026-09-17T19:19:59Z") == 1789672799
+
+
+def test_epoch_from_iso_accepts_a_numeric_offset():
+    assert epoch_from_iso("2026-09-17T21:19:59+02:00") == 1789672799
+
+
+def test_epoch_from_iso_treats_a_naive_timestamp_as_utc():
+    """A value with no zone must not be read in the machine's local time.
+
+    `datetime.fromisoformat` returns a naive datetime there, and naive
+    `.timestamp()` silently applies the local zone -- so the same response
+    would decode to a different instant depending on where the client runs,
+    and every exported track would shift by the offset.
+    """
+    assert epoch_from_iso("2026-09-17T19:19:59") == 1789672799
+
+
+def test_epoch_from_iso_matches_the_exporters_own_rendering():
+    """Round-trips against `export._iso`, which is what writes GPX `<time>`.
+
+    If these two ever disagree the error is a constant time shift in the
+    output, which renders as a perfectly plausible track.
+    """
+    from trackiwi.export import _iso
+
+    assert _iso(epoch_from_iso("2026-09-17T19:19:59Z")) == "2026-09-17T19:19:59Z"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "not-a-timestamp", "2026-13-45T99:99:99Z", "1766663018", "2026-09-17 19:19:59 CEST"],
+)
+def test_epoch_from_iso_converts_an_unparseable_value_at_the_boundary(value):
+    """Including a bare digit string: a numeric epoch is *not* ISO 8601, and
+    silently accepting one here would make the two functions interchangeable
+    in a way that defeats keeping them apart."""
+    with pytest.raises(TrackiwiError, match="timestamp"):
+        epoch_from_iso(value)
+
+
+@pytest.mark.parametrize("value", [None, 1766663018, 1.5, [], {}])
+def test_epoch_from_iso_rejects_a_non_string(value):
+    """The field is absent or `null` on a tracker that has never reported, and
+    a `TypeError` escaping `main()` as a traceback is the failure mode the
+    boundary-conversion rule exists to prevent."""
+    with pytest.raises(TrackiwiError, match="timestamp"):
+        epoch_from_iso(value)
+
+
+def test_epoch_from_iso_rejects_a_timestamp_outside_the_exportable_range():
+    """Same bound as the CSV path: a `fix_at` the exporters cannot render is
+    malformed, and must not reach them (see `_MIN_FIX_AT`/`_MAX_FIX_AT`)."""
+    with pytest.raises(TrackiwiError, match="timestamp"):
+        epoch_from_iso("1969-12-31T00:00:00Z")

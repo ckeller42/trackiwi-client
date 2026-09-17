@@ -15,6 +15,7 @@ import re
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 from . import COLUMNS, __version__
@@ -40,8 +41,64 @@ _MAX_FIX_AT = 253402300799
 
 
 def normalize_epoch(value: int) -> int:
-    """Return `value` as epoch seconds, accepting seconds or milliseconds."""
+    """Return `value` as epoch seconds, accepting seconds or milliseconds.
+
+    The sync CSV's form, and only that: `parse_positions` has already called
+    `int()` on the field by the time this runs. See :func:`epoch_from_iso` for
+    the ISO 8601 form that `GET /api/v2/trackers` sends, and for why the two
+    are separate functions.
+    """
     return value // 1000 if value > _MILLISECOND_THRESHOLD else value
+
+
+def epoch_from_iso(value: str) -> int:
+    """Return an ISO 8601 timestamp as epoch seconds.
+
+    `fix_at` has **two types on two endpoints**: an epoch integer in seconds
+    in the sync CSV, and an ISO 8601 string inside `latest_positionlog` on
+    `GET /api/v2/trackers` (`received_at` likewise). Both were verified live.
+
+    This is a *sibling* of :func:`normalize_epoch`, not an extension of it,
+    because the two forms differ in more than their input type:
+
+    - A single `int | str` function would be ambiguous on its most likely bad
+      input. `"1766663018"` is a string that is also an epoch, so a union-typed
+      normaliser has to guess whether a digit string means "parse as ISO" or
+      "coerce and treat as epoch" — and either guess is wrong somewhere. Two
+      functions make the caller say which endpoint the value came from, which
+      it always knows.
+    - The failure handling is opposite. A bad CSV field must raise `ValueError`
+      so `parse_positions` skips and counts the row (one bad row must not
+      discard a sync page). There is no row to skip when reading a JSON field,
+      so this converts to `TrackiwiError` at the module boundary instead, per
+      the project's boundary-conversion rule.
+    - `normalize_epoch` keeps exactly the contract its existing callers and
+      tests rely on, with no widened signature to re-verify.
+
+    `datetime.fromisoformat` handles the trailing `Z` from Python 3.11, which
+    is this project's floor (checked on 3.11 itself, not inferred from the
+    changelog), so no dependency and no hand-rolled parsing is needed.
+
+    A value with no zone is read as **UTC**. `fromisoformat` returns a naive
+    datetime there and naive `.timestamp()` quietly applies the *machine's*
+    local zone, which would decode the same response to a different instant on
+    a different machine and shift every exported track by the offset.
+
+    The result is range-checked like the CSV path's, so a timestamp the
+    exporters cannot render never reaches them.
+    """
+    if not isinstance(value, str):
+        raise TrackiwiError(f"expected an ISO 8601 timestamp, got {type(value).__name__}")
+    try:
+        moment = datetime.fromisoformat(value.strip())
+    except ValueError as error:
+        raise TrackiwiError(f"unparseable timestamp from trackiwi: {value!r}") from error
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    epoch = int(moment.timestamp())
+    if not _MIN_FIX_AT <= epoch <= _MAX_FIX_AT:
+        raise TrackiwiError(f"timestamp outside the exportable range: {value!r}")
+    return epoch
 
 
 def _coerce(column: str, raw: str) -> float | int | None:
