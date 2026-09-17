@@ -8,13 +8,14 @@ moment a fixture moved. See the design spec, section 7.2.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 DENY_SUFFIXES = {".db", ".db-journal", ".sqlite", ".sqlite3"}
-TRACK_SUFFIXES = {".gpx", ".geojson", ".kml", ".csv"}
+TRACK_SUFFIXES = {".gpx", ".geojson", ".kml", ".csv", ".xml"}
 DENY_NAMES = {"config.json", ".env"}
 ALLOWED_TRACK_DIR = "tests/fixtures"
 ALLOWED_TRACK_BASENAME_PREFIX = "synthetic-"
@@ -24,12 +25,46 @@ SELF = "tools/check_no_private_data.py"
 SQLITE_HEADER = b"SQLite format 3\x00"
 
 
+#: A GeoJSON document identifies itself exactly, by its own top-level `type`
+#: discriminator (RFC 7946) — no coordinate heuristics involved. This is the
+#: same class of exact check as the SQLite header sniff below, and it is what
+#: closes the `export --format geojson -o positions.json` hole: `.json` is the
+#: natural name for a GeoJSON file, and it used to pass all three layers.
+GEOJSON_TYPES = {
+    "FeatureCollection",
+    "Feature",
+    "GeometryCollection",
+    "Point",
+    "LineString",
+    "MultiPoint",
+    "MultiLineString",
+    "Polygon",
+    "MultiPolygon",
+}
+
+
 def _has_sqlite_header(path: str) -> bool:
     try:
         with open(path, "rb") as handle:
             return handle.read(len(SQLITE_HEADER)) == SQLITE_HEADER
     except OSError:
         return False
+
+
+def _is_geojson(path: str) -> bool:
+    """True only for a parseable JSON object carrying a GeoJSON `type`.
+
+    Unparseable JSON — a malformed config, a fixture, a lockfile — is not a
+    GeoJSON export: it falls through to the existing secret scan rather than
+    erroring out. `json.JSONDecodeError` is a `ValueError`, which keeps this
+    working on the Python 3.9 the pre-commit hook runs with.
+    """
+    try:
+        with open(path, "rb") as handle:
+            data = json.loads(handle.read().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("type") in GEOJSON_TYPES
 
 
 def check_paths(paths: Iterable[str]) -> list[str]:
@@ -49,7 +84,8 @@ def check_paths(paths: Iterable[str]) -> list[str]:
                 f"{path}: database file (sqlite header detected) may never be committed"
             )
             continue
-        if suffix in TRACK_SUFFIXES and not (
+        is_track = suffix in TRACK_SUFFIXES or (suffix == ".json" and _is_geojson(path))
+        if is_track and not (
             parent == ALLOWED_TRACK_DIR and name.startswith(ALLOWED_TRACK_BASENAME_PREFIX)
         ):
             problems.append(

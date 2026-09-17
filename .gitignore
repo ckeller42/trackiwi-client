@@ -12,10 +12,18 @@ config.json
 
 # Exported tracks (real coordinates). Synthetic test data lives in
 # tests/fixtures/synthetic-* and is the ONLY location allowed to hold these.
+#
+# *.json and *.xml are here because `export --format geojson -o positions.json`
+# is the natural filename (most GIS and JS tooling expects .json) and a GPX
+# saved as track.xml is the same hole in the other format. A legitimate JSON or
+# XML file therefore needs `git add -f`; the pre-commit guard then inspects its
+# content and lets it through unless it really is a GeoJSON document.
 *.gpx
 *.geojson
 *.kml
 *.csv
+*.json
+*.xml
 !tests/fixtures/synthetic-*
 
 # --- Python ------------------------------------------------------------------
