@@ -27,6 +27,11 @@ dev = [
     "sphinx>=8,<10",
     "sphinx-needs==8.5.0",
     "interrogate>=1.7",
+    # Pinned exactly: strict mode's finding set is version-sensitive (new checks
+    # land in minor releases), so a pin keeps the type gate reproducible — same
+    # reasoning as the sphinx-needs pin above. No third-party stubs are needed
+    # because the package imports only the standard library.
+    "mypy==2.3.1",
 ]
 
 [project.scripts]
@@ -76,3 +81,48 @@ ignore-semiprivate = true
 ignore-nested-functions = true
 ignore-module = false
 exclude = ["tests", "docs", ".venv", "build", "dist"]
+
+[tool.mypy]
+# Static type gate. The package is heavily annotated, so strict is achievable;
+# the value is in the errors surfaced at the seams (network JSON, sqlite rows,
+# argparse Namespaces). Zero third-party imports means zero stubs to install.
+python_version = "3.11"
+strict = true
+# Beyond `strict`: flag ignores that no longer match a real error, casts that
+# do nothing, and code made unreachable by the types (a latent-bug smell).
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+files = ["trackiwi", "tools", "tests"]
+
+[[tool.mypy.overrides]]
+# Test functions are conventionally left unannotated (a `def test_x():` returns
+# nothing meaningful and pytest never inspects the annotation), and the fixtures
+# they call are equally untyped, so the "must be annotated" family and the
+# "calling an untyped function" check are relaxed for tests only. Every other
+# strict check — real type errors in test bodies, bad calls into the package,
+# unreachable code, redundant casts — still applies, so the tests are genuinely
+# type-checked. `tests/` has no `__init__.py` (a deliberate choice for pytest's
+# prepend import mode), so its files are top-level modules — `test_check...`,
+# `conftest` — not `tests.*`, and mypy only accepts a `*` as a whole path
+# component, so the modules are listed by name. A new test file must be added
+# here to inherit the relaxation; until then strict applies and mypy says so.
+module = [
+    "conftest",
+    "test_check_no_private_data",
+    "test_cli",
+    "test_cli_reads",
+    "test_client_auth",
+    "test_client_reads",
+    "test_client_sync",
+    "test_export",
+    "test_invariants",
+    "test_live",
+    "test_main_module",
+    "test_parse",
+    "test_store",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+disallow_untyped_calls = false
