@@ -6,7 +6,15 @@ SQLite or output formats.
 
 from __future__ import annotations
 
-from . import COLUMNS
+import contextlib
+import json
+import os
+import platform
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from . import COLUMNS, __version__
 
 _FLOAT_COLUMNS = {"latitude", "longitude", "speed"}
 _REQUIRED_COLUMNS = ("id", "tracker_id", "fix_at", "latitude", "longitude")
@@ -70,3 +78,152 @@ def parse_positions(text: str) -> tuple[list[tuple], int]:
         values["fix_at"] = normalize_epoch(int(values["fix_at"]))
         rows.append(tuple(values[c] for c in COLUMNS))
     return rows, skipped
+
+
+WEBSITE = "https://www.trackiwi.com"
+APP_NAME = "trackiwi"
+APP_VERSION = "0.0.0"
+USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
+DEFAULT_TIMEOUT = 30
+SYNC_TIMEOUT = 60
+
+
+def default_config_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(base) if base else Path.home() / ".config"
+    return root / "trackiwi" / "config.json"
+
+
+def _check(status: int, body: bytes) -> None:
+    """Raise the right error for a non-2xx status, per the app's own handling."""
+    if status < 400:
+        return
+    if status in (401, 412):
+        raise AuthError("invalid credentials or expired session", status=status)
+    if status == 409:
+        raise TrackiwiError(
+            "the account needs attention — open the trackiwi app and check", status=status
+        )
+    if status == 429:
+        raise TrackiwiError("rate limited by trackiwi — wait, then re-run", status=status)
+    if status == 503:
+        raise TrackiwiError("trackiwi is in maintenance — try again later", status=status)
+    detail = body[:200].decode("utf-8", "replace")
+    raise TrackiwiError(f"API error {status}: {detail}", status=status)
+
+
+class Client:
+    """Read-only access to a trackiwi account.
+
+    The API base is never hardcoded: it comes from the login response's
+    `server` field. `opener` exists so tests can inject a fake transport.
+    """
+
+    def __init__(
+        self,
+        api_base: str | None = None,
+        token: str | None = None,
+        user_id: int | None = None,
+        opener=None,
+    ) -> None:
+        self.api_base = api_base.rstrip("/") if api_base else None
+        self.token = token
+        self.user_id = user_id
+        self.opener = opener or urllib.request.urlopen
+        self.config_path = default_config_path()
+
+    @property
+    def authenticated(self) -> bool:
+        return bool(self.token and self.api_base)
+
+    @classmethod
+    def load(cls, opener=None) -> Client:
+        path = default_config_path()
+        if not path.exists():
+            return cls(opener=opener)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return cls(
+            api_base=data.get("api_base"),
+            token=data.get("token"),
+            user_id=data.get("user_id"),
+            opener=opener,
+        )
+
+    def save(self) -> None:
+        """Persist the session owner-only. The password is never stored."""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        os.chmod(self.config_path.parent, 0o700)
+        payload = {"api_base": self.api_base, "token": self.token, "user_id": self.user_id}
+        self.config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.chmod(self.config_path, 0o600)
+
+    def _request(
+        self,
+        method: str,
+        url: str,
+        body: dict | None = None,
+        timeout: int = DEFAULT_TIMEOUT,
+        authed: bool = False,
+    ) -> tuple[int, dict, bytes]:
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": USER_AGENT,
+            "App-Name": APP_NAME,
+            "App-Version": APP_VERSION,
+            "User-Platform": "python",
+            "User-Device": "trackiwi-client",
+            "User-OS": platform.platform(),
+            "User-Timezone": "0",
+        }
+        if authed:
+            headers["Authorization"] = f"Bearer {self.token}"
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with self.opener(request, timeout=timeout) as response:
+                # The API may return a `trackiwi-app-command` header, which the
+                # official client executes. We deliberately ignore it.
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers), error.read()
+        except urllib.error.URLError as error:
+            raise TrackiwiError(f"network error: {error.reason}") from error
+
+    def _api(
+        self, method: str, path: str, body: dict | None = None, timeout: int = DEFAULT_TIMEOUT
+    ) -> tuple[int, dict, bytes]:
+        if not self.authenticated:
+            raise AuthError("not logged in — run 'trackiwi login'")
+        return self._request(
+            method, f"{self.api_base}{path}", body=body, timeout=timeout, authed=True
+        )
+
+    def login(self, email: str, password: str) -> dict:
+        status, _, body = self._request(
+            "POST", f"{WEBSITE}/api/login", body={"email": email, "password": password}
+        )
+        _check(status, body)
+        data = json.loads(body)
+        self.api_base = data["server"].rstrip("/")
+        self.token = data["token"]
+        self.user_id = data["user"]["id"]
+        self.save()
+        return data["user"]
+
+    def session_ok(self) -> bool:
+        try:
+            status, _, _ = self._api("GET", "/api/v2/session")
+        except TrackiwiError:
+            return False
+        return status < 400
+
+    def logout(self) -> None:
+        """Revoke server-side first; a local delete alone leaves a live token."""
+        if self.authenticated:
+            with contextlib.suppress(TrackiwiError):
+                self._api("DELETE", "/api/v2/session")
+        self.config_path.unlink(missing_ok=True)
+        self.token = None
