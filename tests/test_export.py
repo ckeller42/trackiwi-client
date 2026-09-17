@@ -38,16 +38,27 @@ def test_gpx_with_no_rows_is_still_valid():
     ET.fromstring(to_gpx([]))
 
 
+def test_geojson_with_no_rows_has_no_features():
+    assert json.loads(to_geojson([]))["features"] == []
+
+
+def test_geojson_single_row_is_a_point():
+    data = json.loads(to_geojson([row(1, lat=31.0, lon=-41.0)]))
+    assert len(data["features"]) == 1
+    geometry = data["features"][0]["geometry"]
+    assert geometry["type"] == "Point"
+    assert geometry["coordinates"] == [-41.0, 31.0]
+    properties = data["features"][0]["properties"]
+    assert properties["point_count"] == 1
+    assert properties["start_time"] == properties["end_time"]
+
+
 def test_geojson_is_a_linestring_in_lon_lat_order():
     data = json.loads(to_geojson([row(1), row(2, lon=-41.5)]))
     geometry = data["features"][0]["geometry"]
     assert geometry["type"] == "LineString"
     assert geometry["coordinates"][0] == [-41.0, 31.0]
     assert geometry["coordinates"][1][0] == -41.5
-
-
-def test_geojson_with_no_rows_has_no_features():
-    assert json.loads(to_geojson([]))["features"] == []
 
 
 def test_csv_has_header_and_rows():

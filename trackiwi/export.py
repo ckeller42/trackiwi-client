@@ -45,14 +45,18 @@ def to_gpx(rows: Sequence) -> str:
 
 
 def to_geojson(rows: Sequence) -> str:
-    """Render rows as a FeatureCollection holding one LineString."""
+    """Render rows as a FeatureCollection holding one Point or LineString."""
     coordinates = [[row["longitude"], row["latitude"]] for row in rows]
     features = []
     if coordinates:
+        if len(coordinates) == 1:
+            geometry = {"type": "Point", "coordinates": coordinates[0]}
+        else:
+            geometry = {"type": "LineString", "coordinates": coordinates}
         features.append(
             {
                 "type": "Feature",
-                "geometry": {"type": "LineString", "coordinates": coordinates},
+                "geometry": geometry,
                 "properties": {
                     "point_count": len(coordinates),
                     "start_time": _iso(rows[0]["fix_at"]),
