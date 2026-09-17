@@ -1,0 +1,12 @@
+# .coderabbit.yaml — explicit config beats app defaults. App install is a MANUAL browser step:
+# https://github.com/apps/coderabbitai  (no-self-merge convention applies once enabled).
+language: en
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_review:
+    enabled: true
+    drafts: false
+chat:
+  auto_reply: true

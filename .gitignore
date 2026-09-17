@@ -12,10 +12,18 @@ config.json
 
 # Exported tracks (real coordinates). Synthetic test data lives in
 # tests/fixtures/synthetic-* and is the ONLY location allowed to hold these.
+#
+# *.json and *.xml are here because `export --format geojson -o positions.json`
+# is the natural filename (most GIS and JS tooling expects .json) and a GPX
+# saved as track.xml is the same hole in the other format. A legitimate JSON or
+# XML file therefore needs `git add -f`; the pre-commit guard then inspects its
+# content and lets it through unless it really is a GeoJSON document.
 *.gpx
 *.geojson
 *.kml
 *.csv
+*.json
+*.xml
 !tests/fixtures/synthetic-*
 
 # --- Python ------------------------------------------------------------------
@@ -30,6 +38,11 @@ build/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# --- Docs --------------------------------------------------------------------
+# The Sphinx requirements-traceability build output. The build runs in CI as a
+# gate; only its HTML hosting is deferred until the repo is public.
+docs/_build/
 
 # --- Editors / OS ------------------------------------------------------------
 .DS_Store

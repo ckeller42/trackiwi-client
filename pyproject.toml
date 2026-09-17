@@ -1,0 +1,128 @@
+[build-system]
+# setuptools>=77 understands the PEP 639 `license = "<SPDX>"` string form and
+# `license-files`; the older table form is deprecated under it.
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trackiwi"
+version = "0.1.0"
+description = "Read-only client for a personal trackiwi GPS account"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.optional-dependencies]
+# The package itself has ZERO runtime dependencies; everything here is tooling.
+# sphinx-needs is pinned because its config API (needs_extra_links, needs_warnings,
+# the -W build-failure behaviour) is version-sensitive; sphinx is capped so a
+# future major cannot silently change the traceability gate.
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+    "detect-secrets>=1.5",
+    "sphinx>=8,<10",
+    "sphinx-needs==8.5.0",
+    "interrogate>=1.7",
+    # Pinned exactly: strict mode's finding set is version-sensitive (new checks
+    # land in minor releases), so a pin keeps the type gate reproducible — same
+    # reasoning as the sphinx-needs pin above. No third-party stubs are needed
+    # because the package imports only the standard library.
+    "mypy==2.3.1",
+]
+
+[project.scripts]
+trackiwi = "trackiwi.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["trackiwi*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: hits the real trackiwi API; requires TRACKIWI_LIVE=1"]
+addopts = "-m 'not live'"
+
+[tool.coverage.run]
+source = ["trackiwi"]
+# __main__.py is a 3-line entry-point shim for `python -m trackiwi`. It is
+# tested (tests/test_main_module.py runs it in a subprocess), but a subprocess
+# is invisible to in-process coverage, so measuring it here would always read
+# 0%. Omitted for that reason, not to inflate the number.
+omit = ["trackiwi/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.interrogate]
+# Docstring-coverage gate. Measured 100% of the public surface with these
+# ignores in place, so `fail-under` sits at the measured value. Dunder, __init__,
+# nested and private `_` helpers are excluded (many private helpers ARE
+# documented, but they are not required to be); the public API must be 100%.
+fail-under = 100
+ignore-init-method = true
+ignore-magic = true
+ignore-private = true
+ignore-semiprivate = true
+ignore-nested-functions = true
+ignore-module = false
+exclude = ["tests", "docs", ".venv", "build", "dist"]
+
+[tool.mypy]
+# Static type gate. The package is heavily annotated, so strict is achievable;
+# the value is in the errors surfaced at the seams (network JSON, sqlite rows,
+# argparse Namespaces). Zero third-party imports means zero stubs to install.
+python_version = "3.11"
+strict = true
+# Beyond `strict`: flag ignores that no longer match a real error, casts that
+# do nothing, and code made unreachable by the types (a latent-bug smell).
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+files = ["trackiwi", "tools", "tests"]
+
+[[tool.mypy.overrides]]
+# Test functions are conventionally left unannotated (a `def test_x():` returns
+# nothing meaningful and pytest never inspects the annotation), and the fixtures
+# they call are equally untyped, so the "must be annotated" family and the
+# "calling an untyped function" check are relaxed for tests only. Every other
+# strict check — real type errors in test bodies, bad calls into the package,
+# unreachable code, redundant casts — still applies, so the tests are genuinely
+# type-checked. `tests/` has no `__init__.py` (a deliberate choice for pytest's
+# prepend import mode), so its files are top-level modules — `test_check...`,
+# `conftest` — not `tests.*`, and mypy only accepts a `*` as a whole path
+# component, so the modules are listed by name. A new test file must be added
+# here to inherit the relaxation; until then strict applies and mypy says so.
+module = [
+    "conftest",
+    "test_check_no_private_data",
+    "test_cli",
+    "test_cli_reads",
+    "test_client_auth",
+    "test_client_reads",
+    "test_client_sync",
+    "test_export",
+    "test_invariants",
+    "test_live",
+    "test_main_module",
+    "test_parse",
+    "test_store",
+]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_decorators = false
+disallow_untyped_calls = false

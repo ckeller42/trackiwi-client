@@ -1,0 +1,9 @@
+# Weekly bumps. `pip` covers the [dev] extra; the package itself has zero runtime dependencies.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: pip
+    directory: /
+    schedule: { interval: weekly }

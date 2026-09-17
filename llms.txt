@@ -1,0 +1,55 @@
+# trackiwi-client
+
+> Unofficial, read-only Python client (library + CLI) for pulling one person's
+> own GPS data out of a personal [trackiwi](https://www.trackiwi.com) account:
+> sync positions into a local SQLite cache and export them as GPX, GeoJSON or
+> CSV. Zero runtime dependencies — standard library only. MIT-licensed (see
+> LICENSE). Unaffiliated with trackiwi; it talks to the private API the vendor's
+> own app uses.
+
+## Overview
+
+- Read-only by construction: the only state-changing request is
+  `DELETE /api/v2/session` (`logout`). No writes to tours, markers, alarms or
+  shares are implemented, ever.
+- Runs installed (`trackiwi …`) or straight from a clone (`python -m trackiwi …`),
+  since there are no dependencies to resolve.
+
+## Docs
+
+- [README](README.md): install, usage, exit codes, and the security posture.
+- [Design spec](docs/superpowers/specs/2026-09-17-trackiwi-client-design.md): the
+  reverse-engineered API reference, architecture, cache schema, error handling,
+  and open questions.
+- [CLAUDE.md](CLAUDE.md): contributor rules, invariants verified against the live
+  API, and repo/CI setup.
+- [SECURITY.md](SECURITY.md): what is sensitive and how to report a concern.
+- [Requirements & traceability](docs/requirements.rst): every requirement as a
+  `sphinx-needs` object, each traced to its verifying test in
+  [docs/traceability.rst](docs/traceability.rst); the docs build fails in CI if
+  any requirement has no verifying test.
+- [LICENSE](LICENSE): MIT.
+
+## Module map (hard boundaries)
+
+- `trackiwi/client.py`: network I/O only (auth, sync, the read-only list reads).
+- `trackiwi/store.py`: SQLite cache only.
+- `trackiwi/export.py`: pure functions producing GPX / GeoJSON / CSV.
+- `trackiwi/cli.py`: command wiring and all user interaction.
+- `trackiwi/__init__.py`: shared contracts — `TrackiwiError`, `AuthError`, the
+  `COLUMNS` tuple, `__version__`. `client.py` and `store.py` never import each
+  other.
+
+## Read-only API surface covered
+
+- `POST /api/login`, `GET`/`DELETE /api/v2/session` (auth and revocation).
+- `POST /api/v2/trackers/sync` (the CSV position feed, cached).
+- `GET /api/v2/trackers` and the read-only lists `GET /api/v2/tours`,
+  `/api/v2/markers`, `/api/v2/marker_categories`, `/api/v2/alarms`,
+  `/api/v2/shares` (live reads, not cached).
+
+## Security posture
+
+The position cache and the plaintext token are movement history of a real
+vehicle and are treated as secrets; the repo commits no private data (see
+SECURITY.md and the README Security section).

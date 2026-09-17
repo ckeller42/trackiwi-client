@@ -21,8 +21,12 @@ exist, and where they have been.
 - **No write access.** See §7. The only state-changing call is `logout`, which
   revokes the client's own session.
 - **No support for other people's accounts**, multi-tenancy, or a hosted service.
-- **Not a reimplementation of the trackiwi app.** Tours, markers, alarms and
-  shares are deliberately out of scope for v1.
+- **Not a reimplementation of the trackiwi app.** The **read-only list**
+  endpoints for tours, markers, marker categories, alarms and shares are in
+  scope — they only read your own account. Every **write/mutation** route
+  (create, update, delete, the trailing-slash item routes,
+  `session/test_alarm`, `session/push_token`) is permanently out of scope; see
+  §3.4 and §7.5.
 
 ## 2. Prior art
 
@@ -77,8 +81,11 @@ Request headers observed: `Accept: application/json`, `App-Name: trackiwi`,
 `App-Version`, `User-Platform`, `User-Device`, `User-OS`, `User-Timezone`
 (minutes, from `Date.getTimezoneOffset()`).
 
-Success (200) returns `{server, token, user}`. `user` carries at least `id`,
-`is_tester`, `early_access_features[]`.
+Success (200) returns `{server, token, user}`. From static analysis of the app,
+this **login** response's `user` appears to carry `id`, `is_tester` and
+`early_access_features[]`; that has not been confirmed live (exercising login
+needs a real password). It is a different response from `GET /api/v2/session`
+below — do not assume the two `user` objects share a shape.
 
 Status semantics, taken from the app's own error handling:
 
@@ -95,7 +102,7 @@ base.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v2/session` | Validate token; returns `{token, user}` |
+| `GET /api/v2/session` | Validate token; returns `{token, user}`, where `user` carries only `id`, `created_at`, `updated_at` (verified live, §3.6 item 6) — **not** `is_tester`/`early_access_features[]` |
 | `DELETE /api/v2/session` | Revoke the session (server-side logout) |
 | `POST {website}/api/login/refresh` | Body `{user_id}`; headers `Trackiwi-Backend-Authorization: Bearer <token>` and `Trackiwi-User-Id` |
 
@@ -130,12 +137,19 @@ client mirrors that behaviour rather than failing the whole batch.
 column, but the sync column list does not include it. The CSV column list above
 is authoritative for parsing; `motion` is ignored.
 
-### 3.4 Endpoints not used in v1
+### 3.4 Endpoint scope
 
-`GET /api/v2/trackers` **is** used. The following exist but are out of scope:
-`/api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
-`/api/v2/alarms`, `/api/v2/shares`, `PUT /api/v2/session/push_token`, and
-`GET {website}/api/share/{id}/getlink`.
+`GET /api/v2/trackers` and the five read-only list endpoints —
+`GET /api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
+`/api/v2/alarms` and `/api/v2/shares` — **are in scope** and implemented. They
+only read the account's own data, share `Client._get_list`, and are not cached
+(the SQLite cache holds positions only).
+
+Everything that changes state is **permanently out of scope** (§7.5): every
+create/update/delete route, the trailing-slash item routes (`/api/v2/tours/`,
+`/api/v2/markers/`, `/api/v2/marker_categories/`, `/api/v2/shares/`,
+`/api/v2/trackers/`), `POST /api/v2/session/test_alarm`,
+`PUT /api/v2/session/push_token`, and `GET {website}/api/share/{id}/getlink`.
 
 ### 3.5 Server-driven command channel
 
@@ -143,6 +157,65 @@ Responses may carry a `trackiwi-app-command` header, which the official client
 **executes**. This client must ignore that header entirely. Executing commands
 delivered by a server we do not control is not acceptable in a tool that has
 filesystem access.
+
+### 3.6 Verified against the live API (2026-09-17)
+
+Everything above this subsection is *static analysis* of the vendor's app
+bundle. Everything in it was **observed in a real response** from a real
+account on 2026-09-17, and therefore supersedes the inferences above where the
+two disagree.
+
+1. **`distance` is centimetres, and it is a per-fix delta — not an odometer.**
+   The field divided by the haversine distance between consecutive fixes is
+   100.00 across 12 consecutive samples (99.98 … 100.03). One sample read
+   80.88, which says the value is reported by the *device* from its own
+   consecutive readings rather than derived server-side from the stored
+   coordinates — so it can legitimately disagree with a two-point calculation
+   when a fix is dropped or GPS jitters. Do not treat it as a cumulative
+   total, and do not expect it to reconcile exactly with the coordinates.
+2. **`voltage` is centivolts.** A reading of `1303` is 13.03 V — a charging
+   12 V system. Same hundredths convention as `distance`.
+3. **`fix_timezone` is an INTEGER, not a string.** Observed value: `1`. It is
+   never a zone name such as `"UTC"`. The parser already required this (the
+   field goes through `int()`) and the cache schema in §5 already declares the
+   column `INTEGER`, so nothing needed changing; it is now pinned by a test
+   that walks a row parse → store → CSV export.
+4. **`fix_at` has two different types on two endpoints.**
+   - In the **sync CSV**: an epoch integer in **seconds** (observed
+     `1766663018`). This resolves §10.5's unit question.
+   - On **`GET /api/v2/trackers`**, inside `latest_positionlog`: an **ISO 8601
+     string** (observed `'2026-09-17T19:19:59Z'`). `received_at` is likewise an
+     ISO string.
+
+   The client therefore has two converters, not one: `normalize_epoch` for the
+   numeric form and `epoch_from_iso` for the ISO form. They are deliberately
+   separate rather than one `int | str` function, because a digit string such
+   as `"1766663018"` is ambiguous between the two and no caller actually needs
+   the ambiguity — each one knows which endpoint it read.
+5. **A sync page is 20,000 rows.** The account observed held 62,361 positions,
+   so an initial sync is four pages.
+6. **`GET /api/v2/session`** returns `{"token": ..., "user": {...}}`, where
+   `user` holds only `id`, `created_at` and `updated_at` — **no email
+   address**. §3.2's claim that `user` carries `is_tester` and
+   `early_access_features[]` is the *login* response's shape, not this one.
+7. **Tracker records carry `alarm_configuration`**, which includes a geofence
+   alarm with `lat`/`long`/`radius`. **`GET /api/v2/trackers` output therefore
+   contains location data, not merely device metadata** — a geofence centre is
+   usually where the vehicle is kept. It must be treated with the care §7.1
+   demands of the position cache, not as an inventory listing.
+8. **Tracker records also carry** `installed_at`, `membership_valid`,
+   `membership_ends_at` and `prunable_at`. The last reads as the vendor's own
+   data-retention horizon for the account's history, which is an argument for
+   keeping a local cache rather than relying on the server.
+
+Also observed, and the reason the `alarms` command carries a privacy warning:
+each alarm record's `event` object embeds `latitude`/`longitude`, so
+`GET /api/v2/alarms` is itself a **location history** — and for a theft or
+geofence alarm, precisely the locations worth protecting.
+
+`markers` and `shares` both answered 200 with an **empty list** on the account
+checked, so their element shape remains **unverified**. The client returns the
+parsed list and promises no field for them.
 
 ## 4. Architecture
 
@@ -392,19 +465,54 @@ exactly.
 
 ## 10. Open questions
 
-Resolved during implementation against live responses, not guessed:
+Resolved during implementation against live responses, not guessed. Items
+marked **ANSWERED** were settled on 2026-09-17; see §3.6 for the evidence.
+They are kept rather than deleted, so that a later reader can see what was
+once unknown and on what basis it was closed.
 
-1. The exact meaning of HTTP **409** on login.
+1. The exact meaning of HTTP **409** on login. **Still open** — not reproduced
+   on a healthy account, and deliberately not provoked.
 2. Token lifetime, and whether `/api/login/refresh` is required in practice.
-3. The JSON shape of `GET /api/v2/trackers`.
+   **Still open.**
+3. The JSON shape of `GET /api/v2/trackers`. **ANSWERED: a bare JSON list**,
+   not a `{"data": [...]}` envelope — as for all five of the other read-only
+   list endpoints. The client nevertheless still accepts the envelope as a
+   fallback: this is one account on one day against an undocumented API with
+   no deprecation policy (§2), so the branch stays. Record *contents* are in
+   §3.6, items 7 and 8, and they include location data.
 4. Whether `trackiwi-position-count` is returned on incremental syncs or only on
-   the initial one.
-5. The unit of `fix_at` — epoch **seconds** or milliseconds — and the exact
-   semantics of `fix_timezone` (offset in minutes, presumably). Both are
-   required before timestamps can be written correctly into GPX, so they must be
-   confirmed against a live response rather than assumed.
-6. The units of `speed` (km/h or m/s), `altitude` (m) and `distance`
-   (cumulative or per-fix), which affect GPX/GeoJSON output fidelity.
+   the initial one. **Still open** — the header was present on the sync
+   observed, but that does not distinguish the two cases. The client already
+   treats it as optional.
+5. The unit of `fix_at`. **ANSWERED: epoch seconds** in the sync CSV (observed
+   `1766663018`) — and, separately, an **ISO 8601 string** inside
+   `latest_positionlog` on `GET /api/v2/trackers` (observed
+   `'2026-09-17T19:19:59Z'`), which the question did not anticipate. See §3.6
+   item 4. `fix_timezone`'s **type** is also ANSWERED: an integer, observed
+   `1`, never a string (§3.6 item 3). Its exact **semantics** remain open —
+   `1` is consistent with hours (CET) and inconsistent with the minutes guess
+   in the original question, but a single sample from a single zone cannot
+   distinguish "hours" from "an index" or "something else". Nothing in the
+   client depends on the interpretation: the value is stored and exported
+   verbatim, and all timestamps are handled in UTC.
+6. The units of `speed` (km/h or m/s), `altitude` (m) and `distance`.
+   **`distance` is ANSWERED: centimetres, and a per-fix delta rather than an
+   odometer** (§3.6 item 1). **`voltage` is ANSWERED: centivolts** (§3.6 item
+   2), which was not part of the original question. `speed` and `altitude`
+   remain **open**: no ground truth was available to calibrate them against,
+   and the exporters do not depend on either (GPX carries `altitude` through
+   as-is and omits `speed`).
+7. Whether the sync `offset` parameter is **exclusive**. **ANSWERED: it is
+   exclusive.** Requesting `offset` equal to the highest position id on a page
+   returns rows strictly greater than that id, with zero overlap between
+   consecutive pages. This was confirmed against a live account by the
+   controller. It is exactly what `Client.sync()` already assumed — the loop
+   sets `offset = max(id seen)` on each page — so no code changed. The
+   strict-monotonicity guard in `sync` stays, now as a defence against a future
+   change in that contract rather than as a hedge against an unverified
+   assumption. (Earlier notes recorded this as open because it could not be
+   verified from here without a live request; that history is kept in
+   CLAUDE.md.)
 
 ## 11. Repository and CI
 
@@ -428,10 +536,13 @@ Set up per the `github-project-setup` house style:
   minor/patch bumps only
 - `CLAUDE.md` at the repository root recording the PR workflow, the gate
   command, and the no-private-data rule
-- Badge row: CI and language now; the licence badge is added together with the
-  licence itself, which is chosen when the repository is published rather than
-  while it is private
+- Badge row: CI, language and licence (MIT). The project is MIT-licensed
+  (`LICENSE` at the repository root, wired into `pyproject.toml`); the badge
+  sits with the others in the README
 
-Sphinx documentation and GitHub Pages are **deferred**: Pages on a private
-repository requires a paid plan. Both are added when the repository is
-published. Until then the README is the documentation.
+The Sphinx **build** runs in CI now: a `sphinx-needs` requirements-traceability
+build that fails (under `sphinx-build -W`) if any requirement lacks a verifying
+test, on every push and pull request. Only **GitHub Pages hosting** of its HTML
+output is **deferred** — Pages on a private repository requires a paid plan — so
+hosting is enabled when the repository is published. Until then the README is
+the end-user documentation and the traceability build runs as a gate only.
