@@ -95,6 +95,56 @@ def test_export_write_failure_does_not_clobber_a_previous_export(tmp_path, monke
     assert list(tmp_path.glob(".out.csv.*.tmp")) == []
 
 
+def test_export_to_existing_file_preserves_mode(tmp_path):
+    import os
+    import stat
+
+    seed_cache()
+    target = tmp_path / "out.csv"
+    target.write_text("previous export\n")
+    # Make it world-readable (0644).
+    os.chmod(target, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+    mode_before = stat.S_IMODE(os.stat(target).st_mode)
+    assert mode_before == 0o644
+
+    assert main(["export", "--format", "csv", "-o", str(target)]) == 0
+
+    mode_after = stat.S_IMODE(os.stat(target).st_mode)
+    assert mode_after == 0o644
+
+
+def test_export_to_new_file_creates_mode_0600(tmp_path):
+    import os
+    import stat
+
+    seed_cache()
+    target = tmp_path / "out.csv"
+    assert not target.exists()
+
+    assert main(["export", "--format", "csv", "-o", str(target)]) == 0
+
+    mode = stat.S_IMODE(os.stat(target).st_mode)
+    assert mode == 0o600
+
+
+def test_export_to_symlink_follows_and_preserves_symlink(tmp_path):
+    import os
+
+    seed_cache()
+    real_file = tmp_path / "real.csv"
+    real_file.write_text("original content\n")
+    symlink = tmp_path / "link.csv"
+    os.symlink(real_file, symlink)
+
+    assert main(["export", "--format", "csv", "-o", str(symlink)]) == 0
+
+    # Verify the symlink still exists and still points to real_file.
+    assert symlink.is_symlink()
+    assert os.readlink(symlink) == str(real_file)
+    # Verify the real file was updated.
+    assert real_file.read_text() != "original content\n"
+
+
 # --- Fix 2: `login --token` requires `--api-base`, and vice versa ---
 
 

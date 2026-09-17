@@ -8,8 +8,10 @@ and never written to disk.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import os
+import stat
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -37,21 +39,40 @@ def _write_atomically(path: str, text: str) -> None:
     Renders to a temporary file in the destination's own directory, then
     `os.replace()`s it over the target. `os.replace` is atomic on the same
     filesystem, so a failure never clobbers a good previous export with a
-    partial one. Any `OSError` (bad path, permissions, a directory where a
-    file was expected, ...) becomes a `TrackiwiError` so `main()` reports it
-    cleanly instead of leaking a traceback.
+    partial one.
+
+    If the destination is a symlink, the symlink is followed and its target
+    is updated in place, leaving the symlink intact. If the destination
+    exists, its mode is preserved on the replacement file. New files default
+    to 0600 for security (consistent with the cache database).
+
+    Any `OSError` (bad path, permissions, a directory where a file was
+    expected, ...) becomes a `TrackiwiError` so `main()` reports it cleanly
+    instead of leaking a traceback.
     """
-    target = Path(path)
+    # Resolve the destination, following symlinks to their real path.
+    real_target = Path(os.path.realpath(path))
     tmp_path: Path | None = None
     try:
-        fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+        # Create temp file in the same directory as the real target.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=real_target.parent, prefix=f".{real_target.name}.", suffix=".tmp"
+        )
         tmp_path = Path(tmp_name)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-        os.replace(tmp_path, target)
+
+        # If the destination exists, preserve its mode.
+        # New files stay at 0600 (mkstemp default); updated files keep their chosen mode.
+        if real_target.exists():
+            mode = stat.S_IMODE(os.stat(real_target).st_mode)
+            os.chmod(tmp_path, mode)
+
+        os.replace(tmp_path, real_target)
     except OSError as error:
-        if tmp_path is not None:
-            tmp_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
         raise TrackiwiError(f"could not write {path}: {error}") from error
 
 
