@@ -32,10 +32,37 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` and `pytest`,
   mirroring CI exactly.
 
+## Repo / CI setup
+
+- GitHub: `ckeller42/trackiwi-client`, **private**. Sphinx docs, GitHub Pages
+  and a licence are deliberately deferred until the repo is made public
+  (Pages on a private repo needs a paid plan).
+- Branch protection on `main`: PR required, `required_approving_review_count:
+  0` (a solo owner cannot approve their own PR, so `1` would lock you out of
+  merging), `enforce_admins: true`, `required_conversation_resolution: true`
+  — the last one is what makes an unresolved CodeRabbit thread block merge.
+- **The CodeRabbit app install is a manual browser step** and cannot be
+  automated: <https://github.com/apps/coderabbitai>. The committed
+  `.coderabbit.yaml` only configures it once installed.
+- Dependabot auto-merge is `workflow_run`-triggered, so it only runs after CI
+  already passed for that exact commit. It merges **minor/patch only**; majors
+  are left for manual review. It deliberately does not rely on the repo's
+  "Allow auto-merge" setting — do not enable that toggle expecting it to help.
+- **CI's gate stage runs `pre-commit run --all-files`, never a bare `ruff`
+  call.** Two reasons, both learned the hard way: the `ruff-format` hook is
+  scoped to Python on purpose, and a bare `ruff format` also rewrites Python
+  code fences inside `docs/` (it silently restructured a fenced snippet in the
+  plan document once, changing its meaning); and `pre-commit` in CI is the
+  third enforcement layer for the no-private-data guard, which a local
+  `git commit --no-verify` can bypass.
+
 ## Gotchas
 
 - System `/usr/bin/python3` is 3.9.6 (Xcode); this project needs 3.11+. Use
   `/opt/local/bin/python3.13` (MacPorts).
+- `tools/check_no_private_data.py` must stay Python 3.9-compatible: the
+  pre-commit hook runs it via `language: system` → `python3`, which on this
+  machine is 3.9.6, not the venv.
 - `pytest` skips live tests by default (`addopts = -m 'not live'`). Run them
   with:
 

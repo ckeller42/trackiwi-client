@@ -1,0 +1,41 @@
+# Staged CI, house style. Stages: test matrix -> single-version gates.
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true          # read-only jobs only
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.13"]    # floor from requires-python, plus the version used locally
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with: { python-version: "${{ matrix.python }}", cache: pip }
+      - run: pip install -e ".[dev]"
+      # The package itself has zero runtime dependencies; [dev] brings pytest/ruff/pre-commit.
+      - run: python -m pytest -q
+      # Cache the hook environments so the gate stage stays fast.
+      - uses: actions/cache@v5
+        if: matrix.python == '3.13'
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-py3.13-${{ hashFiles('.pre-commit-config.yaml') }}
+      # Version-independent gates run ONCE, on the target version — not across the matrix.
+      #
+      # This must be `pre-commit run --all-files` rather than a bare `ruff` call, for two
+      # reasons:
+      #   1. The ruff-format hook is deliberately scoped to Python. A bare `ruff format`
+      #      also rewrites Python code fences inside docs/, which would fail this stage
+      #      on a repo whose docs are correct.
+      #   2. It is the third enforcement layer for the no-private-data guard. The local
+      #      hook can be bypassed with `git commit --no-verify`; this cannot.
+      - name: Gates (lint, format, private-data guard)
+        if: matrix.python == '3.13'
+        run: pre-commit run --all-files --show-diff-on-failure

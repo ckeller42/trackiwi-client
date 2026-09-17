@@ -1,5 +1,8 @@
 # trackiwi-client
 
+[![CI](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml/badge.svg)](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+
 Read-only Python client for pulling positions out of a personal
 [trackiwi](https://www.trackiwi.com) account: sync them into a local SQLite
 cache, export them as GPX, GeoJSON or CSV.
