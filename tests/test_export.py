@@ -178,3 +178,64 @@ def test_gpx_refuses_to_emit_non_finite_coordinates():
         to_gpx([row(1, lat=float("inf"))])
     with pytest.raises(ValueError, match="non-finite"):
         to_gpx([row(1, lon=float("nan"))])
+
+
+# --- `fix_timezone` is an INTEGER, end to end ----------------------------
+#
+# Verified live: the server sends an integer offset (a small number such as
+# 1), never a zone name like "UTC". The whole chain already assumes that --
+# `_coerce` calls `int()` on the field because it is not in `_FLOAT_COLUMNS`,
+# the store declares the column `INTEGER`, and the CSV exporter writes it
+# verbatim -- but nothing pinned it, so the assumption was free to rot in any
+# of the three places independently. This walks one row through all of them.
+
+
+def test_fix_timezone_stays_an_integer_from_parse_through_store_to_csv(tmp_path):
+    from trackiwi.client import parse_positions
+    from trackiwi.store import Store
+
+    parsed, skipped = parse_positions("1001,7,1758000000,1,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert skipped == 0
+    fields = dict(zip(COLUMNS, parsed[0], strict=True))
+    assert fields["fix_timezone"] == 1
+    assert isinstance(fields["fix_timezone"], int)
+    assert not isinstance(fields["fix_timezone"], bool)
+
+    with Store(tmp_path / "positions.db") as store:
+        store.upsert(parsed)
+        stored = store.query()[0]
+        # SQLite is dynamically typed, so an INTEGER column would happily hold
+        # the string "UTC" the fixtures used to imply. Assert the *storage
+        # class*, not just the Python value, or this passes on a text value.
+        assert isinstance(stored["fix_timezone"], int)
+        assert (
+            store.conn.execute(
+                "SELECT typeof(fix_timezone) FROM positions WHERE id = 1001"
+            ).fetchone()[0]
+            == "integer"
+        )
+        rows = store.query()
+
+    csv_text = to_csv(rows)
+    header, first = csv_text.strip().splitlines()
+    column = header.split(",").index("fix_timezone")
+    assert first.split(",")[column] == "1"
+
+
+def test_a_zone_name_in_the_fix_timezone_column_is_skipped_as_malformed():
+    """The string "UTC" is not a value this API sends, and the parser already
+    refuses it: `fix_timezone` goes through `int()`. Pinned so that widening
+    `_coerce` cannot quietly start accepting a shape the server never emits."""
+    from trackiwi.client import parse_positions
+
+    rows, skipped = parse_positions("1001,7,1758000000,UTC,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert rows == []
+    assert skipped == 1
+
+
+def test_an_absent_fix_timezone_is_still_allowed():
+    """It is a nullable column: an empty field must stay `None`, not become 0."""
+    from trackiwi.client import parse_positions
+
+    rows, _ = parse_positions("1001,7,1758000000,,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert dict(zip(COLUMNS, rows[0], strict=True))["fix_timezone"] is None
