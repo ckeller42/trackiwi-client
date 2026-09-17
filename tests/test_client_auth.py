@@ -157,6 +157,43 @@ def test_session_ok_propagates_non_auth_errors():
         Client.load(opener=opener).session_ok()
 
 
+# --- Boundary conversion: no exception class may escape as a raw traceback ---
+
+
+def _write_config(text: str) -> None:
+    path = default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_corrupt_config_becomes_a_trackiwierror():
+    """A truncated config file used to raise `json.JSONDecodeError`, which
+    `main()` does not catch — every single command died with a traceback."""
+    _write_config('{"api_base": "https://api.example.invalid", "tok')
+    with pytest.raises(TrackiwiError, match="config file is corrupt"):
+        Client.load()
+
+
+def test_config_that_is_not_an_object_becomes_a_trackiwierror():
+    _write_config("[1, 2, 3]")
+    with pytest.raises(TrackiwiError, match="config file is corrupt"):
+        Client.load()
+
+
+def test_non_json_login_response_becomes_a_trackiwierror_without_the_body():
+    """A WAF or captive portal answering 200 with an HTML page used to raise
+    `json.JSONDecodeError`. The converted message must not carry the body,
+    which can echo back the request's own Authorization header."""
+    body = b"<html>blocked: Authorization: Bearer super-secret-token</html>"
+    opener = FakeOpener(FakeResponse(body))
+    with pytest.raises(TrackiwiError) as excinfo:
+        Client(opener=opener).login("a@example.invalid", "pw")
+    message = str(excinfo.value)
+    assert "unexpected response from trackiwi" in message
+    assert "super-secret-token" not in message
+    assert "html" not in message
+
+
 def test_logout_clears_api_base_and_user_id_too():
     client = Client(opener=FakeOpener(login_response()))
     client.login("a@example.invalid", "pw")

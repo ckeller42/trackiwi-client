@@ -84,7 +84,10 @@ def cmd_login(args: argparse.Namespace) -> int:
         client.save()
         print("Session stored. Run 'trackiwi trackers' to verify it.")
         return 0
-    email = args.email or input("trackiwi email: ").strip()
+    try:
+        email = args.email or input("trackiwi email: ").strip()
+    except EOFError as error:
+        raise TrackiwiError("no email given and stdin is closed — pass --email") from error
     password = getpass.getpass("trackiwi password: ")
     user = Client().login(email, password)
     print(f"Logged in as user {user.get('id')}.")
@@ -141,9 +144,21 @@ def cmd_export(args: argparse.Namespace) -> int:
     end = _epoch(args.end, end_of_day=True) if args.end else None
     if start is not None and end is not None and start > end:
         raise TrackiwiError("--from date is after --to date")
-    with Store() as store:
-        rows = store.query(tracker_id=args.tracker, start=start, end=end)
-    text = FORMATS[args.format](rows)
+    if default_db_path().exists():
+        with Store() as store:
+            rows = store.query(tracker_id=args.tracker, start=start, end=end)
+    else:
+        # Never create the cache as a side effect of a read-only command: the
+        # file is a movement history, and an export has nothing to put in it.
+        rows = []
+    try:
+        text = FORMATS[args.format](rows)
+    except (ValueError, OverflowError, OSError) as error:
+        # The exporters are pure, so they raise plain exceptions: a `fix_at`
+        # outside `datetime`'s range or a non-finite coordinate cached before
+        # those were rejected at parse time. Convert at this boundary rather
+        # than letting it escape main() as a traceback.
+        raise TrackiwiError(f"cached data cannot be exported: {error}") from error
     if args.output:
         _write_atomically(args.output, text)
         print(f"wrote {len(rows)} positions to {args.output}", file=sys.stderr)
@@ -153,10 +168,21 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
+    path = default_db_path()
     if not args.yes:
-        raise TrackiwiError(f"this deletes {default_db_path()} — pass --yes to confirm")
-    with Store() as store:
-        store.purge()
+        raise TrackiwiError(f"this deletes {path} — pass --yes to confirm")
+    # Unlink without opening the database. Opening it first meant a corrupt
+    # cache raised in `Store.__enter__` before the delete ever happened —
+    # failing in exactly the case where a user most wants the movement history
+    # gone (spec section 7.1) — and on a machine that had never synced it
+    # created the file just to delete it again.
+    # The sidecar files are deleted too: a journal left behind by a crashed
+    # write holds position rows just like the database does.
+    for target in (path, *(path.with_name(path.name + s) for s in ("-journal", "-wal", "-shm"))):
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as error:
+            raise TrackiwiError(f"could not delete {target}: {error}") from error
     print("Local position cache deleted.")
     return 0
 
@@ -204,6 +230,14 @@ def main(argv: list[str] | None = None) -> int:
     except TrackiwiError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+    except BrokenPipeError:
+        # `trackiwi export --format csv | head`: the reader is gone, which is
+        # not an error. Redirect stderr to devnull so the interpreter's own
+        # flush-on-exit does not print "Exception ignored" afterwards (the
+        # idiom from the Python docs' note on SIGPIPE).
+        with contextlib.suppress(OSError, ValueError):
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+        return 0
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 1

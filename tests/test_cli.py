@@ -297,6 +297,103 @@ def test_login_never_persists_the_password(monkeypatch):
     assert "password" not in saved
 
 
+# --- Fix 7: no exception class escapes main() as a raw traceback ---
+
+
+def _corrupt_cache():
+    from trackiwi.store import default_db_path
+
+    path = default_db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"not a database, just some bytes\n" * 8)
+    return path
+
+
+def _corrupt_config():
+    from trackiwi.client import default_config_path
+
+    path = default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"api_base": "https://api.example.invalid", "tok')
+    return path
+
+
+def test_export_with_a_corrupt_cache_reports_a_clean_error(capsys):
+    _corrupt_cache()
+    assert main(["export", "--format", "csv"]) == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "purge" in err
+    assert "Traceback" not in err
+
+
+def test_purge_deletes_a_corrupt_cache(capsys):
+    """Spec section 7.1: `purge` must actually delete the movement history.
+    It used to open the database first, so on a corrupt file it raised before
+    reaching the unlink — failing in exactly the case where a user most wants
+    the file gone."""
+    path = _corrupt_cache()
+    assert main(["purge", "--yes"]) == 0
+    assert not path.exists()
+
+
+def test_purge_does_not_create_a_cache_that_does_not_exist(capsys):
+    from trackiwi.store import default_db_path
+
+    assert main(["purge", "--yes"]) == 0
+    assert not default_db_path().exists()
+    assert not default_db_path().parent.exists()
+
+
+def test_export_does_not_create_a_cache_that_does_not_exist(capsys):
+    from trackiwi.store import default_db_path
+
+    assert main(["export", "--format", "csv"]) == 0
+    assert not default_db_path().exists()
+
+
+def test_a_corrupt_config_reports_a_clean_error(capsys):
+    _corrupt_config()
+    assert main(["trackers"]) == 1
+    err = capsys.readouterr().err
+    assert "config file is corrupt" in err
+    assert "Traceback" not in err
+
+
+def test_export_of_an_unrepresentable_timestamp_reports_a_clean_error(capsys):
+    """A `fix_at` already in the cache from before the parse-time range check
+    must not crash the exporter with an uncaught ValueError."""
+    with Store() as store:
+        store.upsert([row(1, fix_at=10_000_000_001_000_000)])
+    assert main(["export", "--format", "gpx"]) == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "Traceback" not in err
+
+
+def test_export_survives_a_closed_pipe(monkeypatch, capsys):
+    """`trackiwi export --format csv | head` closes the pipe early; that used
+    to surface as an uncaught BrokenPipeError."""
+    seed_cache()
+
+    def broken(*_args, **_kwargs):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr("sys.stdout.write", broken)
+    assert main(["export", "--format", "csv"]) == 0
+
+
+def test_login_without_email_on_closed_stdin_reports_a_clean_error(monkeypatch, capsys):
+    def eof(*_args, **_kwargs):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", eof)
+    assert main(["login"]) == 1
+    err = capsys.readouterr().err
+    assert "--email" in err
+    assert "Traceback" not in err
+
+
 def test_logout_on_success_reports_revocation(capsys, monkeypatch):
     calls = []
 

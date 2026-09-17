@@ -78,6 +78,23 @@ def test_non_finite_speed_is_skipped():
     assert skipped == 1
 
 
+@pytest.mark.parametrize("fix_at", ["10000000001000000", "-62135596800000000", "0"])
+def test_fix_at_outside_the_datetime_range_is_skipped(fix_at):
+    """`normalize_epoch` divides by 1000 exactly once, so a microsecond
+    timestamp stays ~1000x too large. Without a range check the store accepts
+    it and every later export dies on `datetime.fromtimestamp` — not just the
+    export of that row, but of any date range that includes it."""
+    rows, skipped = parse_positions(f"1001,7,{fix_at},120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert rows == []
+    assert skipped == 1
+
+
+def test_plausible_fix_at_is_still_accepted():
+    rows, skipped = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert len(rows) == 1
+    assert skipped == 0
+
+
 def test_blank_body_yields_nothing():
     assert parse_positions("") == ([], 0)
     assert parse_positions("\n\n") == ([], 0)

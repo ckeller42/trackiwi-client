@@ -105,6 +105,18 @@ def test_failed_batch_is_rolled_back(tmp_path):
         assert s.count() == 0
 
 
+def test_corrupt_database_becomes_a_trackiwierror_naming_the_way_out(tmp_path):
+    """A non-database file at the cache path used to raise
+    `sqlite3.DatabaseError`, which `main()` does not catch: export, sync and
+    purge all died with a traceback that gave no hint how to recover."""
+    from trackiwi.client import TrackiwiError
+
+    path = tmp_path / "positions.db"
+    path.write_bytes(b"not a database, just some bytes\n" * 8)
+    with pytest.raises(TrackiwiError, match="purge"), Store(path):
+        pass  # pragma: no cover - __enter__ raises
+
+
 def test_permissions_are_self_healed(tmp_path):
     path = tmp_path / "positions.db"
     path.touch()

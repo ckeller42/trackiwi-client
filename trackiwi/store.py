@@ -1,6 +1,10 @@
 """Local SQLite cache of positions.
 
 This is the only module that touches the database. It performs no network I/O.
+The single import from `client.py` is the `TrackiwiError` type: the design spec
+(section 4) deliberately keeps one exception pair instead of a hierarchy, and a
+corrupt cache has to be reportable as a user-facing error rather than as a raw
+`sqlite3` exception.
 
 The cache is a complete movement history of a physical vehicle, so the file is
 created owner-only inside an owner-only directory. See the design spec,
@@ -15,6 +19,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from . import COLUMNS
+from .client import TrackiwiError
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (
@@ -54,10 +59,21 @@ class Store:
     def __enter__(self) -> Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
-        self._conn = sqlite3.connect(self.path)
-        self._conn.row_factory = sqlite3.Row
+        conn = sqlite3.connect(self.path)
         os.chmod(self.path, 0o600)
-        self._conn.executescript(_SCHEMA)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.executescript(_SCHEMA)
+        except sqlite3.Error as error:
+            # A corrupt or non-database file used to raise sqlite3.DatabaseError
+            # here, which is not a TrackiwiError and escaped main() as a
+            # traceback that gave no hint how to recover. Close the connection
+            # on the way out so a short-lived CLI does not leak it either.
+            conn.close()
+            raise TrackiwiError(
+                f"local cache is corrupt ({self.path}) — run 'trackiwi purge --yes'"
+            ) from error
+        self._conn = conn
         return self
 
     def __exit__(self, exc_type: type[BaseException] | None, *exc: object) -> None:

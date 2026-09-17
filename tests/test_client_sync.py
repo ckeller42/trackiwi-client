@@ -108,6 +108,15 @@ def test_non_advancing_offset_raises_instead_of_looping_forever():
         list(c.sync())
 
 
+def test_non_json_trackers_response_becomes_a_trackiwierror_without_the_body():
+    c = client(FakeResponse(b"<html>Authorization: Bearer super-secret-token</html>"))
+    with pytest.raises(TrackiwiError) as excinfo:
+        c.trackers()
+    message = str(excinfo.value)
+    assert "unexpected response from trackiwi" in message
+    assert "super-secret-token" not in message
+
+
 def test_total_header_lookup_is_case_insensitive():
     c = client(FakeResponse(PAGE_1, headers={"Trackiwi-Position-Count": "5"}), FakeResponse(b""))
     _, _, total = next(iter(c.sync()))

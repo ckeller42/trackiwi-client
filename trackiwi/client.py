@@ -25,6 +25,15 @@ _REQUIRED_COLUMNS = ("id", "tracker_id", "fix_at", "latitude", "longitude")
 #: design spec, section 10.5.
 _MILLISECOND_THRESHOLD = 10_000_000_000
 
+#: Plausible range for `fix_at` *after* normalisation, in epoch seconds:
+#: anything from 1970-01-01T00:00:01Z to 9999-12-31T23:59:59Z. The upper bound
+#: is what `datetime.fromtimestamp` can represent, so a value beyond it would
+#: pass parsing and the store and then crash every export (not only of that
+#: row, but of any range containing it). If trackiwi ever emits microseconds,
+#: `normalize_epoch` divides by 1000 only once and the value lands here.
+_MIN_FIX_AT = 1
+_MAX_FIX_AT = 253402300799
+
 
 class TrackiwiError(Exception):
     """Any failure talking to trackiwi."""
@@ -74,6 +83,11 @@ def parse_positions(text: str) -> tuple[list[tuple], int]:
         line = line.strip()
         if not line:
             continue
+        # `split(",")` rather than the `csv` module: every one of the 14
+        # columns is numeric, so the sync body can never contain a quoted or
+        # embedded-comma field. Note the asymmetry with `export.to_csv`, which
+        # does use `csv.writer` — an export is written for other tools, not to
+        # be re-read here.
         fields = line.split(",")
         if len(fields) != len(COLUMNS):
             skipped += 1
@@ -86,7 +100,11 @@ def parse_positions(text: str) -> tuple[list[tuple], int]:
         if any(values[c] is None for c in _REQUIRED_COLUMNS):
             skipped += 1
             continue
-        values["fix_at"] = normalize_epoch(int(values["fix_at"]))
+        fix_at = normalize_epoch(int(values["fix_at"]))
+        if not _MIN_FIX_AT <= fix_at <= _MAX_FIX_AT:
+            skipped += 1
+            continue
+        values["fix_at"] = fix_at
         rows.append(tuple(values[c] for c in COLUMNS))
     return rows, skipped
 
@@ -137,6 +155,21 @@ def _check(status: int, body: bytes) -> None:
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
+def _decode_json(body: bytes) -> object:
+    """Parse a response body, converting a non-JSON body at the boundary.
+
+    A WAF, captive portal or API gateway can answer 200 with an HTML page;
+    `json.loads` then raises `json.JSONDecodeError`, which is not a
+    `TrackiwiError` and used to escape `main()` as a traceback. The message
+    never includes the body, because such a page can echo the request's own
+    `Authorization` header back at us.
+    """
+    try:
+        return json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise TrackiwiError("unexpected response from trackiwi") from error
+
+
 class Client:
     """Read-only access to a trackiwi account.
 
@@ -166,7 +199,14 @@ class Client:
         path = default_config_path()
         if not path.exists():
             return cls(opener=opener)
-        data = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise TrackiwiError(
+                f"config file is corrupt ({path}) — run 'trackiwi login' again"
+            ) from error
+        if not isinstance(data, dict):
+            raise TrackiwiError(f"config file is corrupt ({path}) — run 'trackiwi login' again")
         return cls(
             api_base=data.get("api_base"),
             token=data.get("token"),
@@ -231,7 +271,7 @@ class Client:
             "POST", f"{WEBSITE}/api/login", body={"email": email, "password": password}
         )
         _check(status, body)
-        data = json.loads(body)
+        data = _decode_json(body)
         try:
             server = data["server"]
             token = data["token"]
@@ -291,7 +331,7 @@ class Client:
         """
         status, _, body = self._api("GET", "/api/v2/trackers")
         _check(status, body)
-        data = json.loads(body)
+        data = _decode_json(body)
         if isinstance(data, list):
             return data
         if isinstance(data, dict) and isinstance(data.get("data"), list):
