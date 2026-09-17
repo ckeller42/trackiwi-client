@@ -37,8 +37,11 @@ def test_gpx_writes_utc_timestamp_and_elevation():
     xml = to_gpx([row(fix_at=1758000000)])
     ns = {"g": "http://www.topografix.com/GPX/1/1"}
     tree = ET.fromstring(xml)
-    assert tree.find(".//g:trkpt/g:time", ns).text.endswith("Z")
-    assert tree.find(".//g:trkpt/g:ele", ns).text == "12"
+    time_el = tree.find(".//g:trkpt/g:time", ns)
+    ele_el = tree.find(".//g:trkpt/g:ele", ns)
+    assert time_el is not None and ele_el is not None
+    assert time_el.text is not None and time_el.text.endswith("Z")
+    assert ele_el.text == "12"
 
 
 def test_gpx_omits_elevation_when_absent():
@@ -110,10 +113,12 @@ def test_gpx_track_points_are_not_interleaved_between_trackers():
 
 def test_gpx_track_name_identifies_the_tracker():
     tree = ET.fromstring(to_gpx(two_tracker_rows()))
-    assert [t.find("g:name", NS).text for t in tree.findall("g:trk", NS)] == [
-        "tracker 101",
-        "tracker 202",
-    ]
+    names = []
+    for t in tree.findall("g:trk", NS):
+        name_el = t.find("g:name", NS)
+        assert name_el is not None
+        names.append(name_el.text)
+    assert names == ["tracker 101", "tracker 202"]
 
 
 def test_gpx_single_tracker_is_still_exactly_one_track_and_segment():

@@ -3,6 +3,9 @@
 All fixtures synthetic: invented ids, names and coordinates.
 """
 
+import argparse
+from typing import cast
+
 import pytest
 
 from trackiwi.cli import build_parser, main
@@ -119,7 +122,13 @@ def test_the_alarms_help_warns_that_the_list_is_a_location_history():
     a movement record. Someone reaching for `alarms` to check what fired has
     to be told that before they paste the output anywhere."""
     parser = build_parser()
-    alarms = parser._subparsers._group_actions[0].choices["alarms"]
+    # Reaching into argparse internals: `_subparsers` is optional and a subparser
+    # action's `choices` is typed as a bare `Iterable | None`, so narrow it to the
+    # name->parser map it actually is.
+    subparsers = parser._subparsers
+    assert subparsers is not None
+    choices = cast("dict[str, argparse.ArgumentParser]", subparsers._group_actions[0].choices)
+    alarms = choices["alarms"]
     text = f"{alarms.format_help()} {alarms.description or ''}"
     assert "location" in text.lower()
 

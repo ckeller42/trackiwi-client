@@ -1,3 +1,4 @@
+import email.message
 import io
 import json
 import os
@@ -122,7 +123,12 @@ def test_session_ok_is_false_when_rejected():
 
 
 def _http_error(status: int, body: bytes = b"") -> urllib.error.HTTPError:
-    return urllib.error.HTTPError(f"{WEBSITE}/api/login", status, "error", {}, io.BytesIO(body))
+    # `HTTPError`'s `hdrs` is an `email.message.Message`, not a bare dict; the
+    # client only ever calls `dict(error.headers)` on it, so an empty Message is
+    # the faithful stand-in.
+    return urllib.error.HTTPError(
+        f"{WEBSITE}/api/login", status, "error", email.message.Message(), io.BytesIO(body)
+    )
 
 
 def test_raised_http_error_401_is_converted_to_autherror():
