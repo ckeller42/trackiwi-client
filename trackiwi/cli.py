@@ -76,6 +76,20 @@ def _write_atomically(path: str, text: str) -> None:
         raise TrackiwiError(f"could not write {path}: {error}") from error
 
 
+def _silence_stderr() -> None:
+    """Point fd 2 at /dev/null so the interpreter's exit flush stays quiet.
+
+    Without this, a write to a closed pipe makes CPython print "Exception
+    ignored in: <_io.TextIOWrapper name='<stdout>'>" while flushing on exit,
+    after the command has already decided what to do about it (the idiom from
+    the Python docs' note on SIGPIPE). Under `capsys` the `fileno()` call
+    raises `io.UnsupportedOperation`, which is both an `OSError` and a
+    `ValueError` and is deliberately swallowed here.
+    """
+    with contextlib.suppress(OSError, ValueError):
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
+
 def _read_token() -> str:
     """Read a token for `--token -`, without it ever reaching argv.
 
@@ -200,8 +214,16 @@ def cmd_export(args: argparse.Namespace) -> int:
     if args.output:
         _write_atomically(args.output, text)
         print(f"wrote {len(rows)} positions to {args.output}", file=sys.stderr)
-    else:
+        return 0
+    try:
         sys.stdout.write(text)
+    except BrokenPipeError:
+        # `trackiwi export --format csv | head`: the reader is gone, which is
+        # not an error — the export is the payload and the reader took what it
+        # wanted. This is the *only* place a dead pipe means success; handling
+        # it for the whole dispatch made `trackiwi sync 2>&1 | head -1` report
+        # a sync that stopped after its first page as exit 0.
+        _silence_stderr()
     return 0
 
 
@@ -274,13 +296,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     except BrokenPipeError:
-        # `trackiwi export --format csv | head`: the reader is gone, which is
-        # not an error. Redirect stderr to devnull so the interpreter's own
-        # flush-on-exit does not print "Exception ignored" afterwards (the
-        # idiom from the Python docs' note on SIGPIPE).
-        with contextlib.suppress(OSError, ValueError):
-            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
-        return 0
+        # Reaching here means a dead pipe somewhere that is *not* the export
+        # payload — `cmd_sync`'s progress line on a closed stderr, say, which
+        # `trackiwi sync 2>&1 | head -1` produces. The command did not finish,
+        # so it must not claim success: returning 0 made a wrapper's
+        # `trackiwi sync && trackiwi export` run on a partial sync. Nothing is
+        # printed because the stream to print on is what just failed.
+        _silence_stderr()
+        return 1
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 1
