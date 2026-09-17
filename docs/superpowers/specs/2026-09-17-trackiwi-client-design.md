@@ -21,8 +21,12 @@ exist, and where they have been.
 - **No write access.** See §7. The only state-changing call is `logout`, which
   revokes the client's own session.
 - **No support for other people's accounts**, multi-tenancy, or a hosted service.
-- **Not a reimplementation of the trackiwi app.** Tours, markers, alarms and
-  shares are deliberately out of scope for v1.
+- **Not a reimplementation of the trackiwi app.** The **read-only list**
+  endpoints for tours, markers, marker categories, alarms and shares are in
+  scope — they only read your own account. Every **write/mutation** route
+  (create, update, delete, the trailing-slash item routes,
+  `session/test_alarm`, `session/push_token`) is permanently out of scope; see
+  §3.4 and §7.5.
 
 ## 2. Prior art
 
@@ -77,8 +81,11 @@ Request headers observed: `Accept: application/json`, `App-Name: trackiwi`,
 `App-Version`, `User-Platform`, `User-Device`, `User-OS`, `User-Timezone`
 (minutes, from `Date.getTimezoneOffset()`).
 
-Success (200) returns `{server, token, user}`. `user` carries at least `id`,
-`is_tester`, `early_access_features[]`.
+Success (200) returns `{server, token, user}`. From static analysis of the app,
+this **login** response's `user` appears to carry `id`, `is_tester` and
+`early_access_features[]`; that has not been confirmed live (exercising login
+needs a real password). It is a different response from `GET /api/v2/session`
+below — do not assume the two `user` objects share a shape.
 
 Status semantics, taken from the app's own error handling:
 
@@ -95,7 +102,7 @@ base.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /api/v2/session` | Validate token; returns `{token, user}` |
+| `GET /api/v2/session` | Validate token; returns `{token, user}`, where `user` carries only `id`, `created_at`, `updated_at` (verified live, §3.6 item 6) — **not** `is_tester`/`early_access_features[]` |
 | `DELETE /api/v2/session` | Revoke the session (server-side logout) |
 | `POST {website}/api/login/refresh` | Body `{user_id}`; headers `Trackiwi-Backend-Authorization: Bearer <token>` and `Trackiwi-User-Id` |
 
@@ -130,12 +137,19 @@ client mirrors that behaviour rather than failing the whole batch.
 column, but the sync column list does not include it. The CSV column list above
 is authoritative for parsing; `motion` is ignored.
 
-### 3.4 Endpoints not used in v1
+### 3.4 Endpoint scope
 
-`GET /api/v2/trackers` **is** used. The following exist but are out of scope:
-`/api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
-`/api/v2/alarms`, `/api/v2/shares`, `PUT /api/v2/session/push_token`, and
-`GET {website}/api/share/{id}/getlink`.
+`GET /api/v2/trackers` and the five read-only list endpoints —
+`GET /api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
+`/api/v2/alarms` and `/api/v2/shares` — **are in scope** and implemented. They
+only read the account's own data, share `Client._get_list`, and are not cached
+(the SQLite cache holds positions only).
+
+Everything that changes state is **permanently out of scope** (§7.5): every
+create/update/delete route, the trailing-slash item routes (`/api/v2/tours/`,
+`/api/v2/markers/`, `/api/v2/marker_categories/`, `/api/v2/shares/`,
+`/api/v2/trackers/`), `POST /api/v2/session/test_alarm`,
+`PUT /api/v2/session/push_token`, and `GET {website}/api/share/{id}/getlink`.
 
 ### 3.5 Server-driven command channel
 
@@ -150,14 +164,6 @@ Everything above this subsection is *static analysis* of the vendor's app
 bundle. Everything in it was **observed in a real response** from a real
 account on 2026-09-17, and therefore supersedes the inferences above where the
 two disagree.
-
-Scope note: this subsection records that the five read-only list endpoints of
-§3.4 (`/api/v2/tours`, `/api/v2/markers`, `/api/v2/marker_categories`,
-`/api/v2/alarms`, `/api/v2/shares`) are now **implemented, read-only**. That
-supersedes their listing as out of scope in §3.4 and in §1's non-goals, which
-have not been rewritten here because this subsection's edit was the only one
-authorised. The write/mutation routes in §3.4 remain out of scope permanently
-(see §7.5).
 
 1. **`distance` is centimetres, and it is a per-fix delta — not an odometer.**
    The field divided by the haversine distance between consecutive fixes is
@@ -496,14 +502,17 @@ once unknown and on what basis it was closed.
    remain **open**: no ground truth was available to calibrate them against,
    and the exporters do not depend on either (GPX carries `altitude` through
    as-is and omits `speed`).
-7. Whether the sync `offset` parameter is **exclusive**. **Still open, and
-   deliberately left so** — see CLAUDE.md, "Known unknown: offset semantics in
-   `sync`". `Client.sync()` assumes exclusivity, which is inferred from the
-   vendor's own web app rather than measured. A third-party claim that this
-   was confirmed live arrived during implementation but could not be verified
-   here (no live request was made, per the implementation brief), and it cited
-   real position ids that must not enter this repository, so the question is
-   recorded as open. The strict-monotonicity guard in `sync` stays.
+7. Whether the sync `offset` parameter is **exclusive**. **ANSWERED: it is
+   exclusive.** Requesting `offset` equal to the highest position id on a page
+   returns rows strictly greater than that id, with zero overlap between
+   consecutive pages. This was confirmed against a live account by the
+   controller. It is exactly what `Client.sync()` already assumed — the loop
+   sets `offset = max(id seen)` on each page — so no code changed. The
+   strict-monotonicity guard in `sync` stays, now as a defence against a future
+   change in that contract rather than as a hedge against an unverified
+   assumption. (Earlier notes recorded this as open because it could not be
+   verified from here without a live request; that history is kept in
+   CLAUDE.md.)
 
 ## 11. Repository and CI
 

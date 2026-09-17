@@ -97,14 +97,39 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   apply the moment the repo goes public or the plan changes.
 - Do not self-merge past unresolved CodeRabbit threads.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
-- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` and `pytest`,
-  mirroring CI exactly.
+- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` and `pytest`
+  with coverage, mirroring CI exactly.
+- **Coverage gate:** `pytest --cov=trackiwi --cov-fail-under=95` in both CI and
+  `ci.sh`. Measured coverage is ~97%; the threshold is 95 (headroom for matrix
+  variance). `[tool.coverage.*]` config lives in `pyproject.toml`.
+- **Secret scanner:** the `detect-secrets` pre-commit hook (pinned `v1.5.0`,
+  baseline `.secrets.baseline`) runs locally and in CI's gate stage. It is
+  **defence-in-depth alongside** the home-rolled `SECRET_RE` guard in
+  `tools/check_no_private_data.py`, not a replacement — keep both. The baseline
+  holds only hashed synthetic/test fakes; regenerate with
+  `detect-secrets scan > .secrets.baseline` and audit before committing.
+- **Run with no install:** `python -m trackiwi …` (`trackiwi/__main__.py`) runs
+  straight from a clone — the payoff of zero runtime deps; identical to the
+  `trackiwi` console script.
 
 ## Repo / CI setup
 
-- GitHub: `ckeller42/trackiwi-client`, **private**. Sphinx docs, GitHub Pages
-  and a licence are deliberately deferred until the repo is made public
-  (Pages on a private repo needs a paid plan).
+- GitHub: `ckeller42/trackiwi-client`, **private**. A licence, and the GitHub
+  *Pages hosting* of the docs, are deferred until the repo is made public
+  (Pages on a private repo needs a paid plan). **Sphinx itself is not
+  deferred** — a `sphinx-needs` requirements-traceability build is being added
+  in a follow-up pass and will run in CI; only the public hosting of its output
+  waits.
+- **Public-flip checklist** (do these the moment the repo goes public or the
+  plan changes — one place so it is a checklist, not a rediscovery):
+  1. Enable the branch-protection ruleset (payload already below in this
+     section — apply it verbatim).
+  2. Enable GitHub Pages to **publish** the Sphinx docs (the build already runs
+     in CI; only hosting was blocked).
+  3. Add a `LICENSE` (chosen at publish time) and the licence badge to the
+     README badge row.
+  4. Enable GitHub-native secret scanning + push protection if the plan allows
+     — it complements the `detect-secrets` hook and the local guard.
 - Branch protection on `main`: **NOT active, and cannot be.** Both APIs that
   could enforce it were tried and both return the same thing on a private
   repo on the free plan:
@@ -177,7 +202,10 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 ## Gotchas
 
 - System `/usr/bin/python3` is 3.9.6 (Xcode); this project needs 3.11+. Use
-  `/opt/local/bin/python3.13` (MacPorts).
+  `/opt/local/bin/python3.13` (MacPorts). Install into a venv:
+  `/opt/local/bin/python3.13 -m venv .venv && .venv/bin/pip install .` (or
+  `-e ".[dev]"` for development). No install is needed just to run it — see the
+  `python -m trackiwi` note in Workflow.
 - `tools/check_no_private_data.py` must stay Python 3.9-compatible: the
   pre-commit hook runs it via `language: system` → `python3`, which on this
   machine is 3.9.6, not the venv.
@@ -260,20 +288,22 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   `SECRET_RE` in the guard matches it as a token-shaped string. Use short SHAs
   (what CLAUDE.md and the ledger do) or append `# allow-secret`.
 
-## Known unknown: offset semantics in `sync`
+## Offset semantics in `sync` (confirmed exclusive)
 
-`Client.sync()` assumes trackiwi's `offset` parameter is **exclusive** — that
-asking for positions "after id 5" does not return id 5 again. The loop sets
-`offset = max(id already seen)` on each page and expects the next page to
-start strictly after that.
+`Client.sync()` treats trackiwi's `offset` parameter as **exclusive** — asking
+for positions "after id 5" does not return id 5 again. The loop sets
+`offset = max(id already seen)` on each page and the next page starts strictly
+after that.
 
-This is *not confirmed* against the real API; it is inferred from the
+**This is now confirmed, not inferred.** The offset was verified exclusive
+against a live account by the controller (spec §10 item 7): requesting `offset`
+equal to the highest id on a page returns rows strictly greater than it, with no
+overlap between consecutive pages. It was previously only *inferred* from the
 vendor's own web app, which uses the same `offset = highest id seen` loop and
-stops only on an empty page. Under inclusive semantics that loop could never
-terminate (it would keep re-fetching the same last row forever), so exclusive
-offsets are the only interpretation consistent with the vendor's own client
-behaving correctly. The live contract test (see above) is what will actually
-confirm or refute this against a real account.
+stops only on an empty page — under inclusive semantics that loop could never
+terminate, which was the strongest available argument before the live
+confirmation. The failure-mode guidance below is kept as history in case the
+undocumented contract ever changes.
 
 If a sync ever fails with `"trackiwi returned no new records past offset N"`,
 this assumption is the first suspect — check whether the server is in fact
