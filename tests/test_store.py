@@ -150,3 +150,74 @@ def test_permissions_are_self_healed(tmp_path):
     with Store(path) as s:
         s.upsert([row(1)])
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+# --- A locked cache is not a corrupt cache (N-1) ---
+
+
+@pytest.fixture
+def impatient_sqlite(monkeypatch):
+    """Make every `sqlite3.connect` give up on a lock at once, not after 5 s.
+
+    Only the wait is shortened; the error raised is the real
+    `sqlite3.OperationalError: database is locked`.
+    """
+    real_connect = sqlite3.connect
+
+    def connect(database, *args, **kwargs):
+        kwargs["timeout"] = 0.05
+        return real_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+
+
+def test_a_locked_database_is_not_reported_as_corrupt(tmp_path, impatient_sqlite):
+    """A concurrent `trackiwi` holding a write lock used to be reported as
+    `local cache is corrupt — run 'trackiwi purge --yes'`, so following the
+    tool's own advice deleted an intact movement history."""
+    from trackiwi import TrackiwiError
+
+    path = tmp_path / "positions.db"
+    with Store(path) as first:
+        first.upsert([row(1)])
+    holder = sqlite3.connect(path)
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        with pytest.raises(TrackiwiError) as excinfo, Store(path):
+            pass  # pragma: no cover - __enter__ raises
+    finally:
+        holder.rollback()
+        holder.close()
+    message = str(excinfo.value)
+    assert "purge" not in message
+    assert "locked" in message
+    with Store(path) as reopened:
+        assert reopened.count() == 1
+
+
+def test_corrupt_database_message_keeps_purge_and_names_the_sqlite_detail(tmp_path):
+    from trackiwi import TrackiwiError
+
+    path = tmp_path / "positions.db"
+    path.write_bytes(b"not a database, just some bytes\n" * 8)
+    with pytest.raises(TrackiwiError) as excinfo, Store(path):
+        pass  # pragma: no cover - __enter__ raises
+    message = str(excinfo.value)
+    assert "purge" in message
+    assert "not a database" in message
+
+
+# --- The library-level purge must make the same promise as the CLI (N-5) ---
+
+
+def test_purge_removes_the_sidecar_files(tmp_path):
+    """A `-wal` file can hold committed position rows, so `Store.purge()` has
+    to remove the sidecars the CLI's `purge` removes."""
+    path = tmp_path / "positions.db"
+    store = Store(path)
+    with store as opened:
+        opened.upsert([row(1)])
+    for suffix in ("-journal", "-wal", "-shm"):
+        path.with_name(path.name + suffix).write_bytes(b"position rows\n")
+    store.purge()
+    assert list(tmp_path.iterdir()) == []

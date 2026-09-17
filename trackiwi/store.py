@@ -79,11 +79,34 @@ class Store:
             # traceback that gave no hint how to recover. Close the connection
             # on the way out so a short-lived CLI does not leak it either.
             conn.close()
-            raise TrackiwiError(
-                f"local cache is corrupt ({self.path}) — run 'trackiwi purge --yes'"
-            ) from error
+            raise self._open_failure(error) from error
         self._conn = conn
         return self
+
+    def _open_failure(self, error: sqlite3.Error) -> TrackiwiError:
+        """Turn a failure to open the cache into the *right* user-facing error.
+
+        The two conditions need opposite advice, and telling them apart is not
+        cosmetic. A locked database is transient — another `trackiwi` process
+        (or a hung one) holds a write lock — and the data is intact; a corrupt
+        one is only recoverable by deleting it. Reporting a lock as corruption
+        told the user to run `trackiwi purge --yes`, which deletes a complete
+        movement history (spec section 7.1) that nothing was wrong with.
+        `sqlite3.OperationalError` is a subclass of `sqlite3.DatabaseError`, so
+        the lock check has to come first. The sqlite text is included either
+        way: without it neither case could be diagnosed from the CLI output.
+        """
+        detail = str(error)
+        if isinstance(error, sqlite3.OperationalError) and (
+            "locked" in detail.lower() or "busy" in detail.lower()
+        ):
+            return TrackiwiError(
+                f"local cache is in use ({self.path}): {detail} — another trackiwi "
+                "process may be running; wait for it to finish and re-run"
+            )
+        return TrackiwiError(
+            f"local cache is corrupt ({self.path}): {detail} — run 'trackiwi purge --yes'"
+        )
 
     def __exit__(self, exc_type: type[BaseException] | None, *exc: object) -> None:
         if self._conn is not None:

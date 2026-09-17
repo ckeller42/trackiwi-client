@@ -488,3 +488,106 @@ def test_logout_on_revocation_failure_warns_to_stderr(capsys, monkeypatch):
     assert "could not revoke" in err.lower()
     assert "may still be valid" in err.lower()
     assert "trackiwi app" in err.lower()
+
+
+# --- N-1: the advice on a locked cache must not be "delete it" ---
+
+
+def test_export_with_a_locked_cache_does_not_advise_purge(capsys, monkeypatch):
+    """A concurrent `trackiwi` holding a write lock was reported as a corrupt
+    cache, and the advertised remedy (`purge --yes`) deletes the intact
+    history."""
+    import sqlite3
+
+    from trackiwi.store import default_db_path
+
+    seed_cache()
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(
+        sqlite3, "connect", lambda db, *a, **k: real_connect(db, *a, **{**k, "timeout": 0.05})
+    )
+    holder = sqlite3.connect(default_db_path())
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        assert main(["export", "--format", "csv"]) == 1
+    finally:
+        holder.rollback()
+        holder.close()
+    err = capsys.readouterr().err
+    assert "purge" not in err
+    assert "locked" in err
+    assert "Traceback" not in err
+    with Store() as store:
+        assert store.count() == 2
+
+
+# --- N-2: a bad config `api_base` must be catchable and recoverable ---
+
+
+def _write_raw_config(text):
+    from trackiwi.client import default_config_path
+
+    path = default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_non_string_api_base_reports_a_clean_error(capsys):
+    _write_raw_config('{"api_base": 123, "token": "tok", "user_id": 1}')
+    assert main(["trackers"]) == 1
+    err = capsys.readouterr().err
+    assert "config file is corrupt" in err
+    assert "Traceback" not in err
+
+
+def test_logout_with_an_http_api_base_still_removes_the_credentials(capsys):
+    """An `http://` base in the config made `Client.load()` raise before
+    `logout` could run, so the stored token — which grants live vehicle
+    location — could never be revoked or even deleted with the tool."""
+    path = _write_raw_config(
+        '{"api_base": "http://api.example.invalid", "token": "live-token", "user_id": 1}'
+    )
+    assert main(["logout"]) == 0
+    err = capsys.readouterr().err
+    assert not path.exists()
+    assert "may still be valid" in err.lower()
+    assert "trackiwi app" in err.lower()
+    assert "live-token" not in err
+    assert "Traceback" not in err
+
+
+# --- N-3: a partial sync must not report success ---
+
+
+def test_sync_with_a_dead_stderr_does_not_report_success(monkeypatch):
+    """`trackiwi sync 2>&1 | head -1` kills the writer of the progress line.
+    `main()`'s blanket `except BrokenPipeError: return 0` then reported a sync
+    that stopped after its first page as a success, so a wrapper running
+    `trackiwi sync && trackiwi export` proceeded on incomplete data."""
+    import io
+
+    batches = [([row(1)], 0, 3), ([row(2, fix_at=1758000060)], 0, 3)]
+    monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client(batches))
+
+    class DeadStderr(io.StringIO):
+        def write(self, text):
+            raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr("sys.stderr", DeadStderr())
+    assert main(["sync"]) != 0
+
+
+# --- N-4: GPX must not emit a non-finite coordinate ---
+
+
+def test_export_of_a_cached_non_finite_coordinate_reports_a_clean_error(capsys):
+    """`cmd_export`'s comment claims the boundary conversion catches a
+    non-finite coordinate already in the cache. It did so only for GeoJSON."""
+    with Store() as store:
+        store.upsert([row(1, lat=float("inf"))])
+    assert main(["export", "--format", "gpx"]) == 1
+    out, err = capsys.readouterr()
+    assert 'lat="inf"' not in out
+    assert "error:" in err
+    assert "Traceback" not in err
