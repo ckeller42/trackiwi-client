@@ -42,10 +42,27 @@ CREATE INDEX IF NOT EXISTS idx_positions_tracker_time
 """
 
 
+#: Suffixes SQLite appends to the database file name for its rollback journal
+#: and WAL bookkeeping. A journal or WAL left behind by a crashed write holds
+#: position rows just like the database does, so deleting the history means
+#: deleting these too.
+SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
+
+
 def default_db_path() -> Path:
     base = os.environ.get("XDG_DATA_HOME")
     root = Path(base) if base else Path.home() / ".local" / "share"
     return root / "trackiwi" / "positions.db"
+
+
+def cache_files(path: Path) -> tuple[Path, ...]:
+    """Every file that can hold cached positions for the database at `path`.
+
+    The single definition behind both `trackiwi purge` and `Store.purge()`:
+    the two used to delete different sets of files while claiming to be
+    equivalent, which made the library API the weaker privacy promise.
+    """
+    return (path, *(path.with_name(path.name + suffix) for suffix in SIDECAR_SUFFIXES))
 
 
 class Store:
@@ -170,13 +187,16 @@ class Store:
         return list(self.conn.execute(sql, params))
 
     def purge(self) -> None:
-        """Close and delete the cache file.
+        """Close and delete the cache, including SQLite's sidecar files.
 
-        The library-level equivalent of `trackiwi purge`. The CLI deliberately
-        does *not* go through here: it unlinks the path without opening the
-        database, so that a corrupt cache can still be deleted.
+        The library-level equivalent of `trackiwi purge`, and equivalent in
+        what it deletes as well as in name: both go through `cache_files`, so
+        a library consumer gets the same guarantee as a CLI user. The CLI
+        deliberately does *not* go through here: it unlinks the paths without
+        opening the database, so that a corrupt cache can still be deleted.
         """
         if self._conn is not None:
             self._conn.close()
             self._conn = None
-        self.path.unlink(missing_ok=True)
+        for target in cache_files(self.path):
+            target.unlink(missing_ok=True)

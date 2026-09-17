@@ -19,7 +19,7 @@ from pathlib import Path
 
 from .client import AuthError, Client, TrackiwiError
 from .export import FORMATS
-from .store import Store, default_db_path
+from .store import Store, cache_files, default_db_path
 
 
 def _epoch(date_text: str, end_of_day: bool = False) -> int:
@@ -197,8 +197,9 @@ def cmd_purge(args: argparse.Namespace) -> int:
     # gone (spec section 7.1) — and on a machine that had never synced it
     # created the file just to delete it again.
     # The sidecar files are deleted too: a journal left behind by a crashed
-    # write holds position rows just like the database does.
-    for target in (path, *(path.with_name(path.name + s) for s in ("-journal", "-wal", "-shm"))):
+    # write holds position rows just like the database does. `cache_files` is
+    # shared with `Store.purge()` so the two cannot drift apart again.
+    for target in cache_files(path):
         try:
             target.unlink(missing_ok=True)
         except OSError as error:
