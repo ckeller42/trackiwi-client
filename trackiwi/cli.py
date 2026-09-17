@@ -76,11 +76,27 @@ def _write_atomically(path: str, text: str) -> None:
         raise TrackiwiError(f"could not write {path}: {error}") from error
 
 
+def _read_token() -> str:
+    """Read a token for `--token -`, without it ever reaching argv.
+
+    A token given as `--token <value>` is written verbatim into the shell
+    history file and is visible in `ps -ww` to every process running as the
+    same user, for the lifetime of the command. Reading it from stdin touches
+    neither; on a terminal it is prompted for without echo.
+    """
+    token = getpass.getpass("trackiwi token: ") if sys.stdin.isatty() else sys.stdin.read()
+    token = token.strip()
+    if not token:
+        raise TrackiwiError("no token supplied on stdin")
+    return token
+
+
 def cmd_login(args: argparse.Namespace) -> int:
     if bool(args.token) != bool(args.api_base):
         raise TrackiwiError("--token and --api-base must be given together")
     if args.token and args.api_base:
-        client = Client(api_base=args.api_base, token=args.token)
+        token = _read_token() if args.token == "-" else args.token
+        client = Client(api_base=args.api_base, token=token)
         client.save()
         print("Session stored. Run 'trackiwi trackers' to verify it.")
         return 0
@@ -193,7 +209,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     login = sub.add_parser("login", help="authenticate and store the session")
     login.add_argument("--email")
-    login.add_argument("--token", help="use an existing token instead of a password")
+    login.add_argument(
+        "--token",
+        help="use an existing token instead of a password; '-' reads it from stdin, "
+        "which keeps it out of the shell history and out of argv",
+    )
     login.add_argument("--api-base", help="API base that goes with --token")
     login.set_defaults(func=cmd_login)
 

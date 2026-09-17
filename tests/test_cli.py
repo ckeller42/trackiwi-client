@@ -266,6 +266,47 @@ def test_sync_does_not_create_cache_when_unauthenticated(capsys):
     assert not default_db_path().exists()
 
 
+# --- Fix 8: `--token -` keeps the token out of argv and shell history ---
+
+
+def test_login_reads_the_token_from_stdin(monkeypatch):
+    """A token passed as `--token <value>` is written to the shell history file
+    and is visible in `ps -ww` to every process running as the same user.
+    `--token -` reads it from stdin, which touches neither."""
+    import io
+
+    from trackiwi.client import default_config_path
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("tok-from-stdin\n"))
+    assert main(["login", "--token", "-", "--api-base", "https://api.example.invalid"]) == 0
+    saved = json.loads(default_config_path().read_text())
+    assert saved["token"] == "tok-from-stdin"
+
+
+def test_login_with_empty_stdin_token_reports_a_clean_error(monkeypatch, capsys):
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    assert main(["login", "--token", "-", "--api-base", "https://api.example.invalid"]) == 1
+    assert "token" in capsys.readouterr().err
+
+
+def test_login_prompts_without_echo_when_stdin_is_a_tty(monkeypatch):
+    from trackiwi.client import default_config_path
+
+    class Tty:
+        def isatty(self):
+            return True
+
+        def read(self):  # pragma: no cover - must not be reached on a tty
+            raise AssertionError("a tty must be prompted, not read")
+
+    monkeypatch.setattr("sys.stdin", Tty())
+    monkeypatch.setattr("trackiwi.cli.getpass.getpass", lambda prompt="": "tok-typed")
+    assert main(["login", "--token", "-", "--api-base", "https://api.example.invalid"]) == 0
+    assert json.loads(default_config_path().read_text())["token"] == "tok-typed"
+
+
 def test_login_never_persists_the_password(monkeypatch):
     captured = {}
 

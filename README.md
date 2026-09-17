@@ -48,11 +48,17 @@ saved, so re-running continues from where it stopped — nothing is lost or
 re-fetched from scratch.
 
 If you would rather not type your password, log in elsewhere and reuse the
-session (both flags are required together — supplying only one is an error):
+session (both flags are required together — supplying only one is an error).
+Pass `--token -` to read the token from stdin, which is the recommended form —
+see [Security](#security) for why:
 
 ```bash
-trackiwi login --token <token> --api-base <server>
+trackiwi login --token - --api-base <server>     # prompts, or reads a pipe
+pass show trackiwi/token | trackiwi login --token - --api-base <server>
 ```
+
+On a terminal `--token -` prompts without echoing; if stdin is a pipe or a
+file, the token is read from it.
 
 ### Exit codes
 
@@ -92,6 +98,15 @@ need it.
 process running as you, and is captured in backups as plaintext. Moving it to
 the macOS Keychain would be a real improvement and is the recommended upgrade.
 Your password is never stored.
+
+**Never pass the token as a command-line argument.** `trackiwi login --token
+<token> ...` writes the token verbatim into your shell history file
+(`~/.zsh_history`, `~/.bash_history`) — plaintext, long-lived, and swept into
+the same Time Machine and cloud backups warned about above — and makes it
+visible in `argv` (`ps -ww`) to every process running as you for the lifetime
+of the command. This is the same credential that grants live location. Use
+`trackiwi login --token - --api-base <server>` instead: stdin touches neither
+the history file nor `argv`, and on a terminal the prompt does not echo.
 
 `logout` revokes the session server-side before deleting the local copy;
 deleting a local copy of a still-valid token would be fake security. If revocation fails (network or server error), the local credentials are still removed and the token may remain valid until revoked in the app.
