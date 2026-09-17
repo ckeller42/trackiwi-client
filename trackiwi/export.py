@@ -42,6 +42,9 @@ def _by_tracker(rows: Sequence) -> dict:
 def _finite(row) -> tuple[float, float]:
     """Return `(latitude, longitude)`, rejecting a non-finite pair.
 
+    Implements :need:`REQ_GEOJSON_VALID` and :need:`REQ_MALFORMED_SKIP` (the
+    export-side second layer for rows cached before parse-time checks existed).
+
     A coordinate is checked at parse time, so this only ever fires for a row
     that reached the cache *before* that check existed — a real population,
     since the client has been runnable throughout. `inf` is not a valid
@@ -57,7 +60,20 @@ def _finite(row) -> tuple[float, float]:
 
 
 def to_gpx(rows: Sequence) -> str:
-    """Render rows as GPX 1.1 with one `<trk>` per tracker."""
+    """Render rows as GPX 1.1 with one `<trk>` per tracker.
+
+    Implements :need:`REQ_EXPORT_PER_TRACKER`.
+
+    >>> rows = [
+    ...     {"id": 1, "tracker_id": 7, "fix_at": 1700000000,
+    ...      "latitude": 31.0, "longitude": -41.0, "altitude": None},
+    ... ]
+    >>> gpx = to_gpx(rows)
+    >>> '<trk>' in gpx and 'tracker 7' in gpx
+    True
+    >>> 'lat="31.000000"' in gpx and 'lon="-41.000000"' in gpx
+    True
+    """
     gpx = ET.Element(
         "gpx",
         {"version": "1.1", "creator": f"trackiwi-client/{__version__}", "xmlns": GPX_NS},
@@ -81,10 +97,27 @@ def to_gpx(rows: Sequence) -> str:
 def to_geojson(rows: Sequence) -> str:
     """Render rows as a FeatureCollection with one Feature per tracker.
 
+    Implements :need:`REQ_EXPORT_PER_TRACKER` and :need:`REQ_GEOJSON_VALID`.
+
     A tracker with a single fix becomes a `Point`, one with several a
     `LineString`. Each Feature carries its `tracker_id` in `properties` so a
     consumer can tell the devices apart — GPX and GeoJSON used to drop it
     entirely, which made a multi-tracker export impossible to split up again.
+
+    >>> import json
+    >>> rows = [
+    ...     {"id": 1, "tracker_id": 7, "fix_at": 1700000000,
+    ...      "latitude": 31.0, "longitude": -41.0},
+    ...     {"id": 2, "tracker_id": 7, "fix_at": 1700000060,
+    ...      "latitude": 31.5, "longitude": -41.5},
+    ... ]
+    >>> doc = json.loads(to_geojson(rows))
+    >>> doc["type"]
+    'FeatureCollection'
+    >>> doc["features"][0]["geometry"]["type"]
+    'LineString'
+    >>> doc["features"][0]["properties"]["tracker_id"]
+    7
     """
     features = []
     for tracker_id, tracker_rows in _by_tracker(rows).items():
@@ -115,7 +148,16 @@ def to_geojson(rows: Sequence) -> str:
 
 
 def to_csv(rows: Sequence) -> str:
-    """Render rows as CSV with a header, in :data:`trackiwi.COLUMNS` order."""
+    """Render rows as CSV with a header, in :data:`trackiwi.COLUMNS` order.
+
+    A raw dump of the cache, so unlike GPX/GeoJSON it does not re-validate.
+
+    >>> row = dict(zip(COLUMNS,
+    ...     (1, 7, 1700000000, 1, 31.0, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)))
+    >>> print(to_csv([row]), end="")
+    id,tracker_id,fix_at,fix_timezone,latitude,longitude,altitude,speed,course,distance,rssi,sat,battery,voltage
+    1,7,1700000000,1,31.0,-41.0,12,0.0,0,0,-71,9,98,4120
+    """
     buffer = io.StringIO()
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(COLUMNS)

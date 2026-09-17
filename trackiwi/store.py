@@ -50,6 +50,7 @@ SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 
 
 def default_db_path() -> Path:
+    """Return the cache path, honouring ``XDG_DATA_HOME``."""
     base = os.environ.get("XDG_DATA_HOME")
     root = Path(base) if base else Path.home() / ".local" / "share"
     return root / "trackiwi" / "positions.db"
@@ -73,6 +74,13 @@ class Store:
         self._conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> Store:
+        """Open the cache owner-only, distinguishing a lock from corruption.
+
+        Implements :need:`REQ_CACHE_MODE_0600` (0600 file in a 0700 directory,
+        self-healing a widened mode) and :need:`REQ_PURGE_NOT_ON_LOCK` (a
+        locked cache is reported as transient, never as corruption to purge),
+        the latter via :meth:`_open_failure`.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
         # Create the file at 0600 *before* sqlite3 can create it at the umask
@@ -136,6 +144,7 @@ class Store:
 
     @property
     def conn(self) -> sqlite3.Connection:
+        """The open connection, or raise if used outside a ``with`` block."""
         if self._conn is None:
             raise RuntimeError("Store must be used as a context manager")
         return self._conn
@@ -159,9 +168,11 @@ class Store:
         return self.count() - before
 
     def max_id(self) -> int | None:
+        """Return the highest stored position id, or ``None`` when empty."""
         return self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]
 
     def count(self) -> int:
+        """Return the number of cached positions."""
         return self.conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
 
     def query(
@@ -188,6 +199,8 @@ class Store:
 
     def purge(self) -> None:
         """Close and delete the cache, including SQLite's sidecar files.
+
+        Implements :need:`REQ_PURGE_DELETES`.
 
         The library-level equivalent of `trackiwi purge`, and equivalent in
         what it deletes as well as in name: both go through `cache_files`, so

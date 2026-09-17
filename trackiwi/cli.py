@@ -36,6 +36,8 @@ def _epoch(date_text: str, end_of_day: bool = False) -> int:
 def _write_atomically(path: str, text: str) -> None:
     """Write `text` to `path` without ever leaving a truncated file behind.
 
+    Implements :need:`REQ_EXPORT_ATOMIC`.
+
     Renders to a temporary file in the destination's own directory, then
     `os.replace()`s it over the target. `os.replace` is atomic on the same
     filesystem, so a failure never clobbers a good previous export with a
@@ -106,6 +108,7 @@ def _read_token() -> str:
 
 
 def cmd_login(args: argparse.Namespace) -> int:
+    """Authenticate (or store a supplied token) and save the session."""
     if bool(args.token) != bool(args.api_base):
         raise TrackiwiError("--token and --api-base must be given together")
     if args.token and args.api_base:
@@ -125,6 +128,12 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 
 def cmd_logout(_: argparse.Namespace) -> int:
+    """Revoke the session and remove local credentials.
+
+    Implements :need:`REQ_LOGOUT_REVOKES`: revokes server-side when it can and,
+    when it cannot (including a stored non-https base), still removes the local
+    credentials and warns that the token may remain valid.
+    """
     try:
         client = Client.load()
     except InsecureApiBaseError as error:
@@ -157,6 +166,7 @@ def cmd_logout(_: argparse.Namespace) -> int:
 
 
 def cmd_trackers(_: argparse.Namespace) -> int:
+    """Print each tracker's id and name, one per line."""
     for tracker in Client.load().trackers():
         print(f"{tracker.get('id')}\t{tracker.get('name', '(unnamed)')}")
     return 0
@@ -292,6 +302,7 @@ READ_DESCRIPTIONS = {
 
 
 def cmd_sync(args: argparse.Namespace) -> int:
+    """Fetch new positions into the local cache, reporting progress."""
     client = Client.load()
     if not client.authenticated:
         # Checked before Store() is ever opened: otherwise an unauthenticated
@@ -321,6 +332,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
 
 
 def cmd_export(args: argparse.Namespace) -> int:
+    """Export cached positions to stdout or a file in the chosen format."""
     start = _epoch(args.start) if args.start else None
     end = _epoch(args.end, end_of_day=True) if args.end else None
     if start is not None and end is not None and start > end:
@@ -360,6 +372,11 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
+    """Delete the local position cache, including SQLite sidecars.
+
+    Implements :need:`REQ_PURGE_DELETES`: unlinks the cache and its sidecars
+    without opening the database, so a corrupt cache can still be removed.
+    """
     path = default_db_path()
     if not args.yes:
         raise TrackiwiError(f"this deletes {path} — pass --yes to confirm")
@@ -381,6 +398,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argparse parser for every subcommand."""
     parser = argparse.ArgumentParser(prog="trackiwi", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -426,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Dispatch a command and map the project's exceptions to exit codes."""
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

@@ -39,6 +39,11 @@ build/
 .coverage
 htmlcov/
 
+# --- Docs --------------------------------------------------------------------
+# The Sphinx requirements-traceability build output. The build runs in CI as a
+# gate; only its HTML hosting is deferred until the repo is public.
+docs/_build/
+
 # --- Editors / OS ------------------------------------------------------------
 .DS_Store
 .idea/

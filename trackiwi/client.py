@@ -43,16 +43,25 @@ _MAX_FIX_AT = 253402300799
 def normalize_epoch(value: int) -> int:
     """Return `value` as epoch seconds, accepting seconds or milliseconds.
 
+    Implements :need:`REQ_FIX_AT_SECONDS`.
+
     The sync CSV's form, and only that: `parse_positions` has already called
     `int()` on the field by the time this runs. See :func:`epoch_from_iso` for
     the ISO 8601 form that `GET /api/v2/trackers` sends, and for why the two
     are separate functions.
+
+    >>> normalize_epoch(1700000000)
+    1700000000
+    >>> normalize_epoch(1700000000000)
+    1700000000
     """
     return value // 1000 if value > _MILLISECOND_THRESHOLD else value
 
 
 def epoch_from_iso(value: str) -> int:
     """Return an ISO 8601 timestamp as epoch seconds.
+
+    Implements :need:`REQ_FIX_AT_SECONDS`.
 
     `fix_at` has **two types on two endpoints**: an epoch integer in seconds
     in the sync CSV, and an ISO 8601 string inside `latest_positionlog` on
@@ -86,6 +95,13 @@ def epoch_from_iso(value: str) -> int:
 
     The result is range-checked like the CSV path's, so a timestamp the
     exporters cannot render never reaches them.
+
+    >>> epoch_from_iso("2023-11-14T22:13:20Z")
+    1700000000
+    >>> epoch_from_iso("2023-11-14T22:13:20+00:00")
+    1700000000
+    >>> epoch_from_iso("2023-11-14T22:13:20")  # naive value read as UTC
+    1700000000
     """
     if not isinstance(value, str):
         raise TrackiwiError(f"expected an ISO 8601 timestamp, got {type(value).__name__}")
@@ -102,6 +118,11 @@ def epoch_from_iso(value: str) -> int:
 
 
 def _coerce(column: str, raw: str) -> float | int | None:
+    """Coerce one CSV field, rejecting a non-finite numeric value.
+
+    Implements :need:`REQ_MALFORMED_SKIP`: a `ValueError` here lets
+    :func:`parse_positions` skip and count the row.
+    """
     raw = raw.strip()
     if raw == "":
         return None
@@ -121,10 +142,21 @@ def _coerce(column: str, raw: str) -> float | int | None:
 def parse_positions(text: str) -> tuple[list[tuple], int]:
     """Parse the sync endpoint's CSV body.
 
+    Implements :need:`REQ_MALFORMED_SKIP` and :need:`REQ_FIX_AT_SECONDS`.
+
     Returns `(rows, skipped)`. Rows are tuples in :data:`trackiwi.COLUMNS`
     order with `fix_at` normalised to epoch seconds. Malformed rows are
     skipped and counted rather than aborting the batch, matching the vendor
     client's behaviour: one bad row must not discard a whole sync page.
+
+    >>> body = "1,7,1700000000,1,31.0,-41.0,12,0.0,0,0,-71,9,98,4120\\n"
+    >>> rows, skipped = parse_positions(body)
+    >>> skipped
+    0
+    >>> rows[0][:3]
+    (1, 7, 1700000000)
+    >>> parse_positions("broken,row\\n")
+    ([], 1)
     """
     rows: list[tuple] = []
     skipped = 0
@@ -167,6 +199,7 @@ SYNC_TIMEOUT = 60
 
 
 def default_config_path() -> Path:
+    """Return the credentials file path, honouring ``XDG_CONFIG_HOME``."""
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "trackiwi" / "config.json"
@@ -193,6 +226,8 @@ _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 def _redact(text: str, token: str | None = None) -> str:
     """Strip bearer credentials from text that is about to be shown.
 
+    Implements :need:`REQ_TOKEN_NEVER_LOGGED`.
+
     Spec section 7.3 requires the token to be redacted in any output. The one
     place a token can plausibly re-enter output is an error body: proxies and
     API gateways echo request details, including request headers, into 4xx/5xx
@@ -208,6 +243,8 @@ def _redact(text: str, token: str | None = None) -> str:
 
 def _check(status: int, body: bytes, token: str | None = None) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling.
+
+    Implements :need:`REQ_TOKEN_NEVER_LOGGED`: the interpolated body is redacted.
 
     `token`, when given, is this session's own token, scrubbed from the body
     in addition to the generic `Bearer ...` pattern. `_check` is module-level
@@ -244,6 +281,8 @@ class InsecureApiBaseError(TrackiwiError):
 
 def _require_https(api_base: str) -> str:
     """Return `api_base` without its trailing slash, insisting on https.
+
+    Implements :need:`REQ_API_BASE_HTTPS`.
 
     Nothing validated the scheme before, and the value arrives from two
     untrusted-ish places: the login response's `server` field and whatever
@@ -299,10 +338,16 @@ class Client:
 
     @property
     def authenticated(self) -> bool:
+        """True when both a token and an API base are present."""
         return bool(self.token and self.api_base)
 
     @classmethod
     def load(cls, opener=None) -> Client:
+        """Load the stored session, self-healing a widened config file.
+
+        Implements :need:`REQ_CONFIG_MODE_0600`: a config file whose mode was
+        widened after login is narrowed back to 0600 here.
+        """
         path = default_config_path()
         if not path.exists():
             return cls(opener=opener)
@@ -368,6 +413,8 @@ class Client:
     def save(self) -> None:
         """Persist the session owner-only. The password is never stored.
 
+        Implements :need:`REQ_CONFIG_MODE_0600`.
+
         The directory and the file are created *at* their final mode, not
         widened-then-narrowed: `write_text` plus a follow-up `chmod` left a
         window (0644 under the usual umask, 0666 under a permissive one) in
@@ -393,6 +440,11 @@ class Client:
         timeout: int = DEFAULT_TIMEOUT,
         authed: bool = False,
     ) -> tuple[int, dict, bytes]:
+        """Perform one HTTP request and return `(status, headers, body)`.
+
+        Implements :need:`REQ_IGNORE_APP_COMMAND`: any `trackiwi-app-command`
+        response header is returned unread and never acted on.
+        """
         headers = {
             "Accept": "application/json",
             "User-Agent": USER_AGENT,
@@ -439,6 +491,12 @@ class Client:
             raise type(error)(message, status=error.status) from None
 
     def login(self, email: str, password: str) -> dict:
+        """Authenticate and store the session.
+
+        Implements :need:`REQ_API_BASE_FROM_LOGIN`: the API base is taken from
+        the login response's ``server`` field, and :need:`REQ_API_BASE_HTTPS`
+        via :func:`_require_https` before it is stored.
+        """
         status, _, body = self._request(
             "POST", f"{WEBSITE}/api/login", body={"email": email, "password": password}
         )
@@ -465,6 +523,7 @@ class Client:
         return user
 
     def session_ok(self) -> bool:
+        """Return whether the stored session is still accepted by the server."""
         try:
             status, _, _ = self._api("GET", "/api/v2/session")
         except AuthError:
@@ -473,6 +532,9 @@ class Client:
 
     def logout(self) -> bool:
         """Revoke server-side first; a local delete alone leaves a live token.
+
+        Implements :need:`REQ_LOGOUT_REVOKES` and :need:`REQ_READONLY` (the one
+        state-changing request this client makes, ``DELETE /api/v2/session``).
 
         Returns `True` if server-side revocation succeeded; `False` if the
         attempt failed (network error, 5xx, etc.). The local state (token,
@@ -609,6 +671,9 @@ class Client:
 
     def sync(self, offset: int | None = None) -> Iterator[tuple[list[tuple], int, int | None]]:
         """Yield `(rows, skipped, total)` batches until the server runs dry.
+
+        Implements :need:`REQ_SYNC_RESUME`, :need:`REQ_SYNC_OFFSET_EXCLUSIVE`
+        and :need:`REQ_SYNC_FAIL_LOUD`.
 
         Offset-based and therefore resumable: if this fails part-way, simply
         running it again continues from the highest id already stored. That is
