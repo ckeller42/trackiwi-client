@@ -436,22 +436,119 @@ class Client:
         self.user_id = None
         return revoked
 
-    def trackers(self) -> list[dict]:
-        """List the account's trackers.
+    def _get_list(self, path: str, what: str) -> list:
+        """GET `path` and return the list of records it answers with.
 
-        The response envelope is not documented; both a bare list and a
-        `{"data": [...]}` wrapper are accepted (design spec, section 10.3).
-        Anything else is not a list of trackers and must not be handed to
-        the caller as if it were one.
+        The one implementation behind all six read-only list endpoints. It was
+        `trackers()`'s body; five more endpoints needed exactly the same four
+        steps (GET, `_check`, decode, insist on a list), and six copies of it
+        would have been six places for the envelope handling to drift apart.
+
+        A payload that is not a list raises rather than being passed through.
+        Handing back a dict or a string would move the failure to whichever
+        caller first indexes it, by which point nothing says which endpoint
+        produced it — hence `what` in the message.
+
+        The `{"data": [...]}` envelope is still accepted alongside a bare list.
+        The live check saw a bare list from every one of the six, but that is
+        one account on one day against an undocumented API with no deprecation
+        policy (design spec, section 2), and the vendor's own bundle reads both
+        shapes. One extra branch is cheaper than a command that dies on a
+        re-wrapped response.
         """
-        status, _, body = self._api("GET", "/api/v2/trackers")
+        status, _, body = self._api("GET", path)
         _check(status, body, self.token)
         data = _decode_json(body)
         if isinstance(data, list):
             return data
         if isinstance(data, dict) and isinstance(data.get("data"), list):
             return data["data"]
-        raise TrackiwiError("unexpected trackers response from trackiwi")
+        raise TrackiwiError(f"unexpected {what} response from trackiwi")
+
+    def trackers(self) -> list[dict]:
+        """List the account's trackers.
+
+        **This output contains location data, not only device metadata.** Each
+        record carries an `alarm_configuration` whose geofence alarm holds
+        `lat`/`long`/`radius` — i.e. a place the owner cares about, typically
+        where the vehicle is kept — and a `latest_positionlog` with the current
+        fix. Treat the return value with the same care as the position cache
+        (design spec, section 7.1), not as an inventory listing.
+
+        Records also carry `installed_at`, `membership_valid`,
+        `membership_ends_at` and `prunable_at`; the last of these reads as the
+        vendor's own data-retention horizon for the account's history.
+
+        Timestamps here are **ISO 8601 strings**, unlike the epoch integers in
+        the sync CSV — `latest_positionlog.fix_at` and `received_at` both are.
+        Use :func:`epoch_from_iso` on them.
+        """
+        return self._get_list("/api/v2/trackers", "trackers")
+
+    def tours(self) -> list[dict]:
+        """List the account's tours.
+
+        Verified live: a bare JSON list whose records carry `color`,
+        `ended_at`, `id`, `name`, `started_at` and `tracker_id`.
+        """
+        return self._get_list("/api/v2/tours", "tours")
+
+    def markers(self) -> list[dict]:
+        """List the account's markers.
+
+        **The element shape is unverified.** The endpoint answered 200 with an
+        empty list on the account it was checked against, so nothing is known
+        about a marker record beyond the fact that the response is a bare list.
+        Records are returned exactly as parsed; no field is promised.
+        """
+        return self._get_list("/api/v2/markers", "markers")
+
+    def marker_categories(self) -> list[dict]:
+        """List the account's marker categories.
+
+        Verified live: a bare JSON list whose records carry `color`, `id` and
+        `name`.
+        """
+        return self._get_list("/api/v2/marker_categories", "marker categories")
+
+    def alarms(self) -> list[dict]:
+        """List the account's alarms.
+
+        Verified live: a bare JSON list whose records carry `acknowledged`,
+        `alarm_type`, `event`, `id`, `inserted_at` and `tracker_id`.
+
+        **This output is a location history.** Each record's `event` object
+        embeds `latitude`/`longitude`, so an alarm list says where the vehicle
+        was every time an alarm fired — which for a theft or geofence alarm is
+        precisely the interesting places. It is not "just" a list of alerts.
+
+        Nothing here acknowledges, clears or tests an alarm: this client is
+        read-only by construction (design spec, section 7.5).
+        """
+        return self._get_list("/api/v2/alarms", "alarms")
+
+    def shares(self) -> list[dict]:
+        """List the account's active shares.
+
+        **The element shape is unverified**, for the same reason as
+        :meth:`markers`: the endpoint answered 200 with an empty list on the
+        account it was checked against. Records are returned exactly as parsed.
+
+        Read-only: this lists shares, it cannot create or revoke one. `share
+        create` was considered and rejected (design spec, section 7.5), because
+        anyone holding a share link can see the vehicle's position.
+        """
+        return self._get_list("/api/v2/shares", "shares")
+
+    # `POST /api/v2/session/test_alarm` exists in trackiwi's API and is
+    # deliberately NOT implemented, here or anywhere else. It fires a real
+    # alarm on a real vehicle, which is both a state change (forbidden by the
+    # read-only rule that allows only `DELETE /api/v2/session`) and a physical
+    # event in the owner's life. There is no safe way to exercise it and no
+    # read-only use for it. The same goes for the item/mutation routes the app
+    # uses to create, update and delete tours, markers, marker categories,
+    # shares and trackers (the trailing-slash variants of the paths above), and
+    # for `PUT /api/v2/session/push_token`.
 
     def sync(self, offset: int | None = None) -> Iterator[tuple[list[tuple], int, int | None]]:
         """Yield `(rows, skipped, total)` batches until the server runs dry.
