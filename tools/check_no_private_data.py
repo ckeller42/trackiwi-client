@@ -16,10 +16,20 @@ from pathlib import Path
 DENY_SUFFIXES = {".db", ".db-journal", ".sqlite", ".sqlite3"}
 TRACK_SUFFIXES = {".gpx", ".geojson", ".kml", ".csv"}
 DENY_NAMES = {"config.json", ".env"}
-ALLOWED_TRACK_PREFIX = "tests/fixtures/synthetic-"
+ALLOWED_TRACK_DIR = "tests/fixtures"
+ALLOWED_TRACK_BASENAME_PREFIX = "synthetic-"
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".toml", ".yaml", ".yml", ".json", ".cfg", ".ini", ".sh"}
 SECRET_RE = re.compile(r"\b(?:[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b")
 SELF = "tools/check_no_private_data.py"
+SQLITE_HEADER = b"SQLite format 3\x00"
+
+
+def _has_sqlite_header(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+    except OSError:
+        return False
 
 
 def check_paths(paths: Iterable[str]) -> list[str]:
@@ -29,12 +39,23 @@ def check_paths(paths: Iterable[str]) -> list[str]:
         path = raw.replace("\\", "/")
         name = Path(path).name
         suffix = Path(path).suffix.lower()
+        parent = str(Path(path).parent).replace("\\", "/")
 
         if suffix in DENY_SUFFIXES:
             problems.append(f"{path}: database files may never be committed")
             continue
-        if suffix in TRACK_SUFFIXES and not path.startswith(ALLOWED_TRACK_PREFIX):
-            problems.append(f"{path}: track exports may only live under {ALLOWED_TRACK_PREFIX}*")
+        if _has_sqlite_header(path):
+            problems.append(
+                f"{path}: database file (sqlite header detected) may never be committed"
+            )
+            continue
+        if suffix in TRACK_SUFFIXES and not (
+            parent == ALLOWED_TRACK_DIR and name.startswith(ALLOWED_TRACK_BASENAME_PREFIX)
+        ):
+            problems.append(
+                f"{path}: track exports may only live directly under {ALLOWED_TRACK_DIR}/ "
+                f"with a '{ALLOWED_TRACK_BASENAME_PREFIX}' basename"
+            )
             continue
         if name in DENY_NAMES or name.startswith(".env."):
             problems.append(f"{path}: credential file")

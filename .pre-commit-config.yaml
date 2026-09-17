@@ -13,7 +13,7 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-        types: [python]
+        types_or: [python, pyi, jupyter]
   - repo: local
     hooks:
       - id: no-private-data

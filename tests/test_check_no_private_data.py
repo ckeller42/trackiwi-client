@@ -37,6 +37,23 @@ def test_synthetic_fixture_is_allowed(tmp_path, monkeypatch):
     assert check_paths([rel]) == []
 
 
+def test_synthetic_named_subdirectory_does_not_launder_real_tracks(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(
+        tmp_path,
+        "tests/fixtures/synthetic-dump/2026-09-17-real-track.gpx",
+        "<gpx/>\n",
+    )
+    assert check_paths([rel]) != []
+
+
+def test_sqlite_header_is_blocked_regardless_of_name(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = "notes.bak"
+    (tmp_path / rel).write_bytes(b"SQLite format 3\x00" + b"\x00" * 16)
+    assert any("database" in p for p in check_paths([rel]))
+
+
 def test_credential_file_is_blocked(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     rel = _write(tmp_path, "config.json", "{}\n")
