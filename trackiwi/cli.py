@@ -17,7 +17,7 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .client import AuthError, Client, TrackiwiError
+from .client import AuthError, Client, InsecureApiBaseError, TrackiwiError
 from .export import FORMATS
 from .store import Store, cache_files, default_db_path
 
@@ -111,7 +111,25 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 
 def cmd_logout(_: argparse.Namespace) -> int:
-    revoked = Client.load().logout()
+    try:
+        client = Client.load()
+    except InsecureApiBaseError as error:
+        # A stored `api_base` that fails validation used to make `logout`
+        # impossible: `Client.load()` raised before the revocation could run,
+        # so a token that grants live vehicle location could not be revoked
+        # *or* deleted with this tool (spec section 7.3 lists revocation on
+        # logout as a required mitigation). Revoking over the stored base is
+        # not an option — sending the token in cleartext is the very thing
+        # `_require_https` prevents — so the local credential goes, loudly.
+        Client.forget_local_session()
+        print(
+            f"Could not revoke the session: {error}\n"
+            "Local credentials have been removed, but the token may still be valid.\n"
+            "Revoke it in the trackiwi app.",
+            file=sys.stderr,
+        )
+        return 0
+    revoked = client.logout()
     if revoked:
         print("Session revoked and local credentials removed.")
     else:

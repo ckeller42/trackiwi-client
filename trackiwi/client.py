@@ -172,6 +172,19 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
+class InsecureApiBaseError(TrackiwiError):
+    """The API base in hand is not usable over https.
+
+    Not a third exception type in the sense of the design spec's section 8
+    taxonomy: it is a `TrackiwiError`, carries the same message and produces
+    the same exit code, and nothing outside this package needs to know it
+    exists. It is here only so `cmd_logout` can tell "the stored base cannot
+    carry a request" apart from every other `TrackiwiError` and still remove
+    a credential that grants live vehicle location. Deliberately not exported
+    from `trackiwi/__init__.py`.
+    """
+
+
 def _require_https(api_base: str) -> str:
     """Return `api_base` without its trailing slash, insisting on https.
 
@@ -180,9 +193,15 @@ def _require_https(api_base: str) -> str:
     `--api-base` (or a config file) says. An `http://` value would send
     `Authorization: Bearer <token>` in cleartext on every request; this also
     catches a typo'd `--api-base`.
+
+    The message names the way out, because a config file holding such a value
+    fails *every* authenticated command and the user needs to know what to do
+    about it — see `Client.load` and `cmd_logout`.
     """
     if not api_base.lower().startswith("https://"):
-        raise TrackiwiError(f"the API base must start with https:// — got {api_base!r}")
+        raise InsecureApiBaseError(
+            f"the API base must start with https:// — got {api_base!r}; run 'trackiwi login' again"
+        )
     return api_base.rstrip("/")
 
 
@@ -238,19 +257,56 @@ class Client:
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as error:
+            # Not corruption: a permission-denied read, a directory in the way
+            # or an I/O error says something different about what is wrong, and
+            # collapsing it into the corrupt-config message dropped the errno
+            # that identifies it. The recovery is the same, because `save()`
+            # chmods the parent directory back to 0700 first.
+            raise TrackiwiError(
+                f"cannot read the config file ({path}): {error} — run 'trackiwi login' again"
+            ) from error
+        try:
+            data = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise TrackiwiError(
                 f"config file is corrupt ({path}) — run 'trackiwi login' again"
             ) from error
+        corrupt = TrackiwiError(f"config file is corrupt ({path}) — run 'trackiwi login' again")
         if not isinstance(data, dict):
-            raise TrackiwiError(f"config file is corrupt ({path}) — run 'trackiwi login' again")
+            raise corrupt
+        api_base = data.get("api_base")
+        # The values are validated, not only the top-level document: a
+        # non-string `api_base` reached `_require_https`, whose `.lower()`
+        # raised an uncaught `AttributeError` — a raw traceback one line past
+        # the check added to prevent exactly that. `None` is legitimate and
+        # means "not logged in".
+        if not isinstance(api_base, (str, type(None))):
+            raise corrupt
         return cls(
-            api_base=data.get("api_base"),
+            api_base=api_base,
             token=data.get("token"),
             user_id=data.get("user_id"),
             opener=opener,
         )
+
+    @classmethod
+    def forget_local_session(cls) -> bool:
+        """Delete the stored credentials, returning whether there were any.
+
+        Does not need a *loadable* config, which is the point: the token grants
+        live vehicle location, so it must stay removable even when the config
+        file holds a value that `Client.load` refuses (an `http://` API base,
+        say). `cmd_logout` uses this as its fallback.
+        """
+        path = default_config_path()
+        existed = path.exists()
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            raise TrackiwiError(f"could not delete {path}: {error}") from error
+        return existed
 
     def save(self) -> None:
         """Persist the session owner-only. The password is never stored.

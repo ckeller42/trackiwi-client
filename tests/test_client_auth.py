@@ -269,3 +269,43 @@ def test_logout_clears_api_base_and_user_id_too():
     assert client.token is None
     assert client.api_base is None
     assert client.user_id is None
+
+
+# --- A config this tool did not write must still fail cleanly (N-2, N-6) ---
+
+
+@pytest.mark.parametrize("value", ["123", "true", '["https://x"]', '{"a": 1}'])
+def test_a_non_string_api_base_becomes_a_trackiwierror(value):
+    """`_require_https` calls `api_base.lower()`, so a non-string value raised
+    an uncaught `AttributeError` — a raw traceback one line past the validation
+    block added to prevent exactly that."""
+    _write_config(f'{{"api_base": {value}, "token": "tok", "user_id": 1}}')
+    with pytest.raises(TrackiwiError, match="config file is corrupt"):
+        Client.load()
+
+
+def test_a_null_api_base_still_loads_as_not_logged_in():
+    _write_config('{"api_base": null, "token": "tok", "user_id": 1}')
+    assert Client.load().authenticated is False
+
+
+def test_an_unreadable_config_reports_the_error_rather_than_corruption():
+    """An `OSError` (permission denied, a directory in the way) is not
+    corruption, and collapsing it into the corrupt-config message dropped the
+    errno that says what is actually wrong."""
+    path = default_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.mkdir()
+    with pytest.raises(TrackiwiError) as excinfo:
+        Client.load()
+    message = str(excinfo.value)
+    assert "corrupt" not in message
+    assert "Errno" in message
+    assert "trackiwi login" in message
+
+
+def test_forget_local_session_removes_the_config():
+    _write_config('{"api_base": "http://api.example.invalid", "token": "tok", "user_id": 1}')
+    assert Client.forget_local_session() is True
+    assert not default_config_path().exists()
+    assert Client.forget_local_session() is False
