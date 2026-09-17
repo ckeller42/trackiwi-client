@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trackiwi"
+version = "0.1.0"
+description = "Read-only client for a personal trackiwi GPS account"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "pre-commit>=3.7"]
+
+[project.scripts]
+trackiwi = "trackiwi.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["trackiwi*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["live: hits the real trackiwi API; requires TRACKIWI_LIVE=1"]
+addopts = "-m 'not live'"
