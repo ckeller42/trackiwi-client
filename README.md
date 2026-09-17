@@ -12,15 +12,31 @@ private API its own app uses, which can change without notice.
 
 ## Install
 
-The system `python3` on macOS is 3.9; this needs 3.11+. If you installed
-Python via MacPorts, use its interpreter directly:
+`python3` on macOS is 3.9; this needs 3.11+. If you installed Python via
+MacPorts, use its interpreter directly. The recommended path is a virtualenv:
 
 ```bash
 /opt/local/bin/python3.13 -m venv .venv
-.venv/bin/pip install -e .
+.venv/bin/pip install .
 ```
 
-No runtime dependencies are installed — the client is standard library only.
+There are zero runtime dependencies, so nothing is downloaded to resolve — the
+client is standard library only.
+
+### Run without installing
+
+Because there is nothing to install, you can skip the step above and run the
+tool straight from a clone — this is the low-friction path:
+
+```bash
+python3.13 -m trackiwi --help          # run from the clone directory
+python3.13 -m trackiwi trackers
+```
+
+`python -m trackiwi` behaves exactly like the installed `trackiwi` command.
+
+If you want an isolated `trackiwi` on your `PATH` without managing the venv
+yourself, `pipx install .` works too.
 
 ## Use
 
@@ -189,6 +205,17 @@ two consequences worth knowing:
 
 ## Security
 
+> ⚠️ **The token is stored in plaintext — read this if the tracker is in a
+> vehicle you use.** The session token lives at
+> `~/.config/trackiwi/config.json` (mode `0600`, but readable by any process
+> running as you and **swept into Time Machine and cloud backups**). It grants
+> **live vehicle location, not just history**, so it is the single most
+> sensitive artifact this tool touches. Your password is never stored. Remove
+> the token with **`trackiwi logout`** (revokes the session server-side, then
+> clears the local copy); delete the movement cache with **`trackiwi purge
+> --yes`**. Moving the token into the macOS Keychain is the recommended
+> upgrade — see below.
+
 **The local cache is the most sensitive thing this tool creates.**
 `~/.local/share/trackiwi/positions.db` is a complete movement history of a
 vehicle: where it is kept, daily patterns, and when it is away. It is created
@@ -224,8 +251,12 @@ either.
 
 ## Development
 
+Install with the dev extras (an editable install, plus the test and lint
+tooling), then run the gate:
+
 ```bash
-./tools/ci.sh     # the same gates CI runs
+.venv/bin/pip install -e ".[dev]"
+./tools/ci.sh     # the same gates CI runs: pre-commit + pytest with coverage
 ```
 
 No private data may enter this repository. A pre-commit hook blocks databases,
