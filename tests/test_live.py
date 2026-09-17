@@ -7,6 +7,7 @@ be answered from real data. It asserts only shape, never content, and must
 never print the token.
 """
 
+import json
 import os
 
 import pytest
@@ -24,11 +25,27 @@ def test_live_contract():
     client = Client.load()
     assert client.authenticated, "run 'trackiwi login' first"
 
+    # trackers() already unwraps the envelope, so it can't tell us what the
+    # raw shape actually was. Go through the same authenticated request path
+    # it uses, but look at the raw JSON before unwrapping — that's the only
+    # way to answer the open envelope question. Never print field values,
+    # only the type and, for an object, its top-level keys.
+    _, _, body = client._api("GET", "/api/v2/trackers")
+    raw = json.loads(body)
+    if isinstance(raw, dict):
+        print("\ntrackers envelope: object with keys", sorted(raw.keys()))
+    else:
+        print("\ntrackers envelope: bare", type(raw).__name__)
+
     trackers = client.trackers()
     assert isinstance(trackers, list) and trackers
-    print("\ntracker keys:", sorted(trackers[0]))
+    print("tracker keys:", sorted(trackers[0]))
 
-    rows, skipped, total = next(iter(client.sync()))
+    try:
+        rows, skipped, total = next(iter(client.sync()))
+    except StopIteration:
+        pytest.skip("no positions recorded for this account yet")
+
     assert rows and len(rows[0]) == len(COLUMNS)
     sample = dict(zip(COLUMNS, rows[0], strict=True))
 

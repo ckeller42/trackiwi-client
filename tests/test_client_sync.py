@@ -3,7 +3,7 @@ import json
 import pytest
 from conftest import FakeOpener, FakeResponse
 
-from trackiwi.client import Client
+from trackiwi.client import Client, TrackiwiError
 
 PAGE_1 = b"1,7,1758000000,120,31.0,-41.0,12,0.0,0,0,-71,9,98,4120\n"
 PAGE_2 = b"2,7,1758000060,120,31.1,-41.1,12,0.0,0,0,-71,9,98,4120\n"
@@ -81,3 +81,40 @@ def test_trackers_accepts_a_bare_list():
 def test_trackers_accepts_a_data_envelope():
     c = client(FakeResponse(b'{"data":[{"id":7,"name":"Bus"}]}'))
     assert c.trackers()[0]["id"] == 7
+
+
+def test_trackers_raises_on_an_unexpected_shape():
+    c = client(FakeResponse(b'{"error":"nope"}'))
+    with pytest.raises(TrackiwiError):
+        c.trackers()
+
+
+def test_all_malformed_page_raises_instead_of_stopping_silently():
+    # Without a parseable id there is no way to compute the next offset, so
+    # a page that is not empty but yields zero rows must fail loudly rather
+    # than look like end-of-data (which would strand the sync forever).
+    c = client(FakeResponse(b"broken,row\n"), FakeResponse(b""))
+    with pytest.raises(TrackiwiError):
+        list(c.sync())
+
+
+def test_non_advancing_offset_raises_instead_of_looping_forever():
+    # If the server ever repeats (or regresses) the highest id, computing
+    # the next offset from it would never move and the loop would spin
+    # forever re-requesting the same page.
+    opener = FakeOpener(FakeResponse(PAGE_1), FakeResponse(PAGE_1))
+    c = Client(api_base="https://api.example.invalid", token="tok", opener=opener)
+    with pytest.raises(TrackiwiError):
+        list(c.sync())
+
+
+def test_total_header_lookup_is_case_insensitive():
+    c = client(FakeResponse(PAGE_1, headers={"Trackiwi-Position-Count": "5"}), FakeResponse(b""))
+    _, _, total = next(iter(c.sync()))
+    assert total == 5
+
+
+def test_non_numeric_count_header_is_ignored_not_fatal():
+    c = client(FakeResponse(PAGE_1, headers={"trackiwi-position-count": "many"}), FakeResponse(b""))
+    _, _, total = next(iter(c.sync()))
+    assert total is None

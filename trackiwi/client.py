@@ -95,6 +95,20 @@ def default_config_path() -> Path:
     return root / "trackiwi" / "config.json"
 
 
+def _header(headers: dict, name: str) -> str | None:
+    """Look up a response header case-insensitively.
+
+    `_request` returns `dict(response.headers)`, which loses the
+    case-insensitivity real HTTP headers have, so a lookup here must not
+    assume the server sent any particular casing.
+    """
+    lname = name.lower()
+    for key, value in headers.items():
+        if key.lower() == lname:
+            return value
+    return None
+
+
 def _check(status: int, body: bytes) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling."""
     if status < 400:
@@ -250,13 +264,17 @@ class Client:
 
         The response envelope is not documented; both a bare list and a
         `{"data": [...]}` wrapper are accepted (design spec, section 10.3).
+        Anything else is not a list of trackers and must not be handed to
+        the caller as if it were one.
         """
         status, _, body = self._api("GET", "/api/v2/trackers")
         _check(status, body)
         data = json.loads(body)
-        if isinstance(data, dict) and "data" in data:
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
             return data["data"]
-        return data
+        raise TrackiwiError("unexpected trackers response from trackiwi")
 
     def sync(self, offset: int | None = None) -> Iterator[tuple[list[tuple], int, int | None]]:
         """Yield `(rows, skipped, total)` batches until the server runs dry.
@@ -264,19 +282,46 @@ class Client:
         Offset-based and therefore resumable: if this fails part-way, simply
         running it again continues from the highest id already stored. That is
         why there is no retry logic anywhere in this client.
+
+        Two failure shapes are distinguished from ordinary end-of-data:
+
+        - A page that parses to zero rows but skipped one or more malformed
+          ones is not "no more data" — it is a parse failure. Continuing
+          would leave the stored offset stuck forever, silently re-fetching
+          and re-failing on the same page, so this raises instead. Only a
+          page with nothing to skip either (a genuinely empty response) ends
+          the loop normally.
+        - If the server ever returns a page whose highest id does not exceed
+          the offset just requested (a duplicate, a stale cache, an
+          off-by-one on their side), advancing by that id would spin
+          forever re-requesting the same data. This raises rather than loop.
         """
         total: int | None = None
         while True:
+            requested_offset = offset
             payload = {"initial_sync": True} if offset is None else {"offset": offset}
             status, headers, body = self._api(
                 "POST", "/api/v2/trackers/sync", body=payload, timeout=SYNC_TIMEOUT
             )
             _check(status, body)
             if total is None:
-                raw_total = headers.get("trackiwi-position-count")
-                total = int(raw_total) if raw_total else None
+                raw_total = _header(headers, "trackiwi-position-count")
+                if raw_total:
+                    try:
+                        total = int(raw_total)
+                    except ValueError:
+                        total = None
             rows, skipped = parse_positions(body.decode("utf-8", "replace"))
             if not rows:
+                if skipped:
+                    raise TrackiwiError(
+                        f"sync page at offset {requested_offset!r} was unparseable "
+                        f"({skipped} row(s) skipped, none usable)"
+                    )
                 return
             yield rows, skipped, total
             offset = max(row[0] for row in rows)
+            if requested_offset is not None and offset <= requested_offset:
+                raise TrackiwiError(
+                    f"trackiwi returned no new records past offset {requested_offset}"
+                )
