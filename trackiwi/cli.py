@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
 import sys
+import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 
 from .client import AuthError, Client, TrackiwiError
 from .export import FORMATS
@@ -28,7 +31,33 @@ def _epoch(date_text: str, end_of_day: bool = False) -> int:
     return int(day.timestamp())
 
 
+def _write_atomically(path: str, text: str) -> None:
+    """Write `text` to `path` without ever leaving a truncated file behind.
+
+    Renders to a temporary file in the destination's own directory, then
+    `os.replace()`s it over the target. `os.replace` is atomic on the same
+    filesystem, so a failure never clobbers a good previous export with a
+    partial one. Any `OSError` (bad path, permissions, a directory where a
+    file was expected, ...) becomes a `TrackiwiError` so `main()` reports it
+    cleanly instead of leaking a traceback.
+    """
+    target = Path(path)
+    tmp_path: Path | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+        tmp_path = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_path, target)
+    except OSError as error:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise TrackiwiError(f"could not write {path}: {error}") from error
+
+
 def cmd_login(args: argparse.Namespace) -> int:
+    if bool(args.token) != bool(args.api_base):
+        raise TrackiwiError("--token and --api-base must be given together")
     if args.token and args.api_base:
         client = Client(api_base=args.api_base, token=args.token)
         client.save()
@@ -55,15 +84,23 @@ def cmd_trackers(_: argparse.Namespace) -> int:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     client = Client.load()
+    if not client.authenticated:
+        # Checked before Store() is ever opened: otherwise an unauthenticated
+        # run leaves behind an empty cache directory and database file.
+        raise AuthError("not logged in — run 'trackiwi login'")
     with Store() as store:
         offset = None if args.full else store.max_id()
         written = skipped_total = 0
-        for rows, skipped, total in client.sync(offset=offset):
-            written += store.upsert(rows)
-            skipped_total += skipped
-            suffix = f" of {total}" if total else ""
-            print(f"\rsynced {written}{suffix} positions", end="", file=sys.stderr)
-        print(file=sys.stderr)
+        try:
+            for rows, skipped, total in client.sync(offset=offset):
+                written += store.upsert(rows)
+                skipped_total += skipped
+                suffix = f" of {total}" if total else ""
+                print(f"\rsynced {written}{suffix} positions", end="", file=sys.stderr)
+        finally:
+            # Always close the \r-progress line, success or failure, so a
+            # later error message never gets appended to a partial line.
+            print(file=sys.stderr)
         if skipped_total:
             print(f"skipped {skipped_total} malformed rows", file=sys.stderr)
         print(f"{written} new positions, {store.count()} cached in total")
@@ -73,12 +110,13 @@ def cmd_sync(args: argparse.Namespace) -> int:
 def cmd_export(args: argparse.Namespace) -> int:
     start = _epoch(args.start) if args.start else None
     end = _epoch(args.end, end_of_day=True) if args.end else None
+    if start is not None and end is not None and start > end:
+        raise TrackiwiError("--from date is after --to date")
     with Store() as store:
         rows = store.query(tracker_id=args.tracker, start=start, end=end)
     text = FORMATS[args.format](rows)
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as handle:
-            handle.write(text)
+        _write_atomically(args.output, text)
         print(f"wrote {len(rows)} positions to {args.output}", file=sys.stderr)
     else:
         sys.stdout.write(text)
