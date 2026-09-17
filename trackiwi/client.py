@@ -6,7 +6,6 @@ SQLite or output formats.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import platform
@@ -249,15 +248,27 @@ class Client:
             return False
         return status < 400
 
-    def logout(self) -> None:
-        """Revoke server-side first; a local delete alone leaves a live token."""
+    def logout(self) -> bool:
+        """Revoke server-side first; a local delete alone leaves a live token.
+
+        Returns `True` if server-side revocation succeeded; `False` if the
+        attempt failed (network error, 5xx, etc.). The local state (token,
+        api_base, user_id, config file) is always cleared regardless, since
+        the caller must decide whether to warn the user that the token may
+        remain valid server-side.
+        """
+        revoked = True
         if self.authenticated:
-            with contextlib.suppress(TrackiwiError):
-                self._api("DELETE", "/api/v2/session")
+            try:
+                status, _, body = self._api("DELETE", "/api/v2/session")
+                _check(status, body)
+            except TrackiwiError:
+                revoked = False
         self.config_path.unlink(missing_ok=True)
         self.token = None
         self.api_base = None
         self.user_id = None
+        return revoked
 
     def trackers(self) -> list[dict]:
         """List the account's trackers.

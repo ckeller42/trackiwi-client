@@ -91,7 +91,7 @@ the macOS Keychain would be a real improvement and is the recommended upgrade.
 Your password is never stored.
 
 `logout` revokes the session server-side before deleting the local copy;
-deleting a local copy of a still-valid token would be fake security.
+deleting a local copy of a still-valid token would be fake security. If revocation fails (network or server error), the local credentials are still removed and the token may remain valid until revoked in the app.
 
 **Never share a trackiwi URL containing a `token=` parameter.** Their app
 accepts `?token=...&apibase=...` for auto-login, so such a link hands over full

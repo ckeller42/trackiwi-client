@@ -92,8 +92,16 @@ def cmd_login(args: argparse.Namespace) -> int:
 
 
 def cmd_logout(_: argparse.Namespace) -> int:
-    Client.load().logout()
-    print("Session revoked and local credentials removed.")
+    revoked = Client.load().logout()
+    if revoked:
+        print("Session revoked and local credentials removed.")
+    else:
+        print(
+            "Could not revoke the session (network or server error).\n"
+            "Local credentials have been removed, but the token may still be valid.\n"
+            "Revoke it in the trackiwi app.",
+            file=sys.stderr,
+        )
     return 0
 
 

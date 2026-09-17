@@ -276,7 +276,7 @@ def test_login_never_persists_the_password(monkeypatch):
     assert "password" not in saved
 
 
-def test_logout_calls_through_and_returns_0(capsys, monkeypatch):
+def test_logout_on_success_reports_revocation(capsys, monkeypatch):
     calls = []
 
     class StubClient:
@@ -286,9 +286,32 @@ def test_logout_calls_through_and_returns_0(capsys, monkeypatch):
 
         def logout(self):
             calls.append(True)
+            return True
 
     monkeypatch.setattr("trackiwi.cli.Client", StubClient)
 
     assert main(["logout"]) == 0
     assert calls == [True]
     assert "revoked" in capsys.readouterr().out.lower()
+
+
+def test_logout_on_revocation_failure_warns_to_stderr(capsys, monkeypatch):
+    calls = []
+
+    class StubClient:
+        @classmethod
+        def load(cls):
+            return cls()
+
+        def logout(self):
+            calls.append(True)
+            return False  # Revocation failed but local state was cleared
+
+    monkeypatch.setattr("trackiwi.cli.Client", StubClient)
+
+    assert main(["logout"]) == 0
+    assert calls == [True]
+    err = capsys.readouterr().err
+    assert "could not revoke" in err.lower()
+    assert "may still be valid" in err.lower()
+    assert "trackiwi app" in err.lower()

@@ -83,7 +83,8 @@ def test_logout_revokes_then_deletes_config():
     Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
     opener = FakeOpener(FakeResponse(b"", status=204))
     client = Client.load(opener=opener)
-    client.logout()
+    revoked = client.logout()
+    assert revoked is True
     assert opener.calls[0].get_method() == "DELETE"
     assert opener.calls[0].full_url == "https://api.example.invalid/api/v2/session"
     assert not default_config_path().exists()
@@ -92,7 +93,8 @@ def test_logout_revokes_then_deletes_config():
 def test_logout_clears_local_state_even_if_revoke_fails():
     Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
     opener = FakeOpener(FakeResponse(b"", status=500))
-    Client.load(opener=opener).logout()
+    revoked = Client.load(opener=opener).logout()
+    assert revoked is False
     assert not default_config_path().exists()
 
 
