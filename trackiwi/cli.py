@@ -14,8 +14,10 @@ import os
 import stat
 import sys
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .client import AuthError, Client, InsecureApiBaseError, TrackiwiError
 from .export import FORMATS
@@ -190,7 +192,7 @@ def _cell(value: object) -> str:
     return text
 
 
-def _print_rows(records: list, fields: tuple[str, ...]) -> None:
+def _print_rows(records: list[Any], fields: tuple[str, ...]) -> None:
     """Print one tab-separated line per record, in `fields` order.
 
     `.get` throughout, deliberately: this is an undocumented API with no
@@ -208,7 +210,7 @@ def _print_rows(records: list, fields: tuple[str, ...]) -> None:
         print("\t".join(_cell(record.get(field)) for field in fields))
 
 
-def _read_command(method: str, fields: tuple[str, ...]):
+def _read_command(method: str, fields: tuple[str, ...]) -> Callable[[argparse.Namespace], int]:
     """Build a `cmd_*` for one read-only list endpoint.
 
     `Client.load` is a **classmethod returning a Client**, so the call below is
@@ -447,7 +449,10 @@ def main(argv: list[str] | None = None) -> int:
     """Dispatch a command and map the project's exceptions to exit codes."""
     args = build_parser().parse_args(argv)
     try:
-        return args.func(args)
+        # `args.func` is an argparse attribute, so it is `Any`; the local pins
+        # the exit code every `cmd_*`/`command` returns back to `int`.
+        exit_code: int = args.func(args)
+        return exit_code
     except AuthError as error:
         print(f"authentication required: {error}", file=sys.stderr)
         print("Run 'trackiwi login'.", file=sys.stderr)

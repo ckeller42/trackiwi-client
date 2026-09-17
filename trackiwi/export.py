@@ -13,17 +13,30 @@ import math
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from typing import Any, Protocol
 
 from . import COLUMNS, __version__
 
 GPX_NS = "http://www.topografix.com/GPX/1/1"
 
 
+class Row(Protocol):
+    """A position row addressed by column name.
+
+    The exporters accept both a `sqlite3.Row` (what `store.query` returns) and a
+    plain `dict` (what the doctests and callers build); both answer `row["name"]`
+    for a column, so that is all this contract promises. Values are `Any` because
+    the cache stores heterogeneous columns (ints, floats, `None`).
+    """
+
+    def __getitem__(self, key: str) -> Any: ...
+
+
 def _iso(fix_at: int) -> str:
     return datetime.fromtimestamp(fix_at, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _by_tracker(rows: Sequence) -> dict:
+def _by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
     """Group rows by `tracker_id`, keeping each tracker's rows in input order.
 
     An export without `--tracker` covers every tracker (design spec, section 6)
@@ -33,13 +46,13 @@ def _by_tracker(rows: Sequence) -> dict:
     tracker gets its own track / feature. Group order is first appearance —
     i.e. earliest fix — which keeps the output deterministic.
     """
-    grouped: dict = {}
+    grouped: dict[Any, list[Row]] = {}
     for row in rows:
         grouped.setdefault(row["tracker_id"], []).append(row)
     return grouped
 
 
-def _finite(row) -> tuple[float, float]:
+def _finite(row: Row) -> tuple[float, float]:
     """Return `(latitude, longitude)`, rejecting a non-finite pair.
 
     Implements :need:`REQ_GEOJSON_VALID` and :need:`REQ_MALFORMED_SKIP` (the
@@ -59,7 +72,7 @@ def _finite(row) -> tuple[float, float]:
     return latitude, longitude
 
 
-def to_gpx(rows: Sequence) -> str:
+def to_gpx(rows: Sequence[Row]) -> str:
     """Render rows as GPX 1.1 with one `<trk>` per tracker.
 
     Implements :need:`REQ_EXPORT_PER_TRACKER`.
@@ -94,7 +107,7 @@ def to_gpx(rows: Sequence) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?>\n{body}\n'
 
 
-def to_geojson(rows: Sequence) -> str:
+def to_geojson(rows: Sequence[Row]) -> str:
     """Render rows as a FeatureCollection with one Feature per tracker.
 
     Implements :need:`REQ_EXPORT_PER_TRACKER` and :need:`REQ_GEOJSON_VALID`.
@@ -119,9 +132,10 @@ def to_geojson(rows: Sequence) -> str:
     >>> doc["features"][0]["properties"]["tracker_id"]
     7
     """
-    features = []
+    features: list[dict[str, Any]] = []
     for tracker_id, tracker_rows in _by_tracker(rows).items():
         coordinates = [[row["longitude"], row["latitude"]] for row in tracker_rows]
+        geometry: dict[str, Any]
         if len(coordinates) == 1:
             geometry = {"type": "Point", "coordinates": coordinates[0]}
         else:
@@ -147,7 +161,7 @@ def to_geojson(rows: Sequence) -> str:
     )
 
 
-def to_csv(rows: Sequence) -> str:
+def to_csv(rows: Sequence[Row]) -> str:
     """Render rows as CSV with a header, in :data:`trackiwi.COLUMNS` order.
 
     A raw dump of the cache, so unlike GPX/GeoJSON it does not re-validate.
@@ -166,7 +180,7 @@ def to_csv(rows: Sequence) -> str:
     return buffer.getvalue()
 
 
-FORMATS: dict[str, Callable[[Sequence], str]] = {
+FORMATS: dict[str, Callable[[Sequence[Row]], str]] = {
     "gpx": to_gpx,
     "geojson": to_geojson,
     "csv": to_csv,

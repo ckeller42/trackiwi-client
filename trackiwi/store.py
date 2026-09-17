@@ -17,6 +17,7 @@ import os
 import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 from . import COLUMNS, TrackiwiError
 
@@ -149,7 +150,7 @@ class Store:
             raise RuntimeError("Store must be used as a context manager")
         return self._conn
 
-    def upsert(self, rows: Iterable[tuple]) -> int:
+    def upsert(self, rows: Iterable[tuple[Any, ...]]) -> int:
         """Insert or replace `rows`, returning how many were *newly inserted*.
 
         The count is a row-count delta rather than `len(rows)`, because
@@ -169,11 +170,15 @@ class Store:
 
     def max_id(self) -> int | None:
         """Return the highest stored position id, or ``None`` when empty."""
-        return self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]
+        # `fetchone()` and its columns are `Any` (sqlite3 has no row types); the
+        # annotated local pins the boundary so the return stays honestly typed.
+        highest: int | None = self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]
+        return highest
 
     def count(self) -> int:
         """Return the number of cached positions."""
-        return self.conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+        total: int = self.conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
+        return total
 
     def query(
         self,

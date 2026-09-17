@@ -14,9 +14,10 @@ import platform
 import re
 import urllib.error
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from . import COLUMNS, __version__
 from . import AuthError as AuthError
@@ -139,7 +140,7 @@ def _coerce(column: str, raw: str) -> float | int | None:
     return value
 
 
-def parse_positions(text: str) -> tuple[list[tuple], int]:
+def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int]:
     """Parse the sync endpoint's CSV body.
 
     Implements :need:`REQ_MALFORMED_SKIP` and :need:`REQ_FIX_AT_SECONDS`.
@@ -158,7 +159,7 @@ def parse_positions(text: str) -> tuple[list[tuple], int]:
     >>> parse_positions("broken,row\\n")
     ([], 1)
     """
-    rows: list[tuple] = []
+    rows: list[tuple[Any, ...]] = []
     skipped = 0
     for line in text.splitlines():
         line = line.strip()
@@ -181,7 +182,13 @@ def parse_positions(text: str) -> tuple[list[tuple], int]:
         if any(values[c] is None for c in _REQUIRED_COLUMNS):
             skipped += 1
             continue
-        fix_at = normalize_epoch(int(values["fix_at"]))
+        # `fix_at` is in `_REQUIRED_COLUMNS`, so the check just above guarantees
+        # it is not None here; `_coerce` returns an `int` for it (not in
+        # `_FLOAT_COLUMNS`). mypy cannot see through the `any(...)` generator, so
+        # this narrows the value it already knows is present.
+        fix_at_raw = values["fix_at"]
+        assert fix_at_raw is not None
+        fix_at = normalize_epoch(int(fix_at_raw))
         if not _MIN_FIX_AT <= fix_at <= _MAX_FIX_AT:
             skipped += 1
             continue
@@ -205,7 +212,7 @@ def default_config_path() -> Path:
     return root / "trackiwi" / "config.json"
 
 
-def _header(headers: dict, name: str) -> str | None:
+def _header(headers: dict[str, str], name: str) -> str | None:
     """Look up a response header case-insensitively.
 
     `_request` returns `dict(response.headers)`, which loses the
@@ -328,7 +335,7 @@ class Client:
         api_base: str | None = None,
         token: str | None = None,
         user_id: int | None = None,
-        opener=None,
+        opener: Callable[..., Any] | None = None,
     ) -> None:
         self.api_base = _require_https(api_base) if api_base else None
         self.token = token
@@ -342,7 +349,7 @@ class Client:
         return bool(self.token and self.api_base)
 
     @classmethod
-    def load(cls, opener=None) -> Client:
+    def load(cls, opener: Callable[..., Any] | None = None) -> Client:
         """Load the stored session, self-healing a widened config file.
 
         Implements :need:`REQ_CONFIG_MODE_0600`: a config file whose mode was
@@ -436,10 +443,10 @@ class Client:
         self,
         method: str,
         url: str,
-        body: dict | None = None,
+        body: dict[str, Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         authed: bool = False,
-    ) -> tuple[int, dict, bytes]:
+    ) -> tuple[int, dict[str, str], bytes]:
         """Perform one HTTP request and return `(status, headers, body)`.
 
         Implements :need:`REQ_IGNORE_APP_COMMAND`: any `trackiwi-app-command`
@@ -473,8 +480,12 @@ class Client:
             raise TrackiwiError(f"network error: {error.reason}") from error
 
     def _api(
-        self, method: str, path: str, body: dict | None = None, timeout: int = DEFAULT_TIMEOUT
-    ) -> tuple[int, dict, bytes]:
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        timeout: int = DEFAULT_TIMEOUT,
+    ) -> tuple[int, dict[str, str], bytes]:
         if not self.authenticated:
             raise AuthError("not logged in — run 'trackiwi login'")
         try:
@@ -490,7 +501,7 @@ class Client:
                 raise
             raise type(error)(message, status=error.status) from None
 
-    def login(self, email: str, password: str) -> dict:
+    def login(self, email: str, password: str) -> dict[str, Any]:
         """Authenticate and store the session.
 
         Implements :need:`REQ_API_BASE_FROM_LOGIN`: the API base is taken from
@@ -502,6 +513,12 @@ class Client:
         )
         _check(status, body, self.token)
         data = _decode_json(body)
+        # `_decode_json` returns `object` (a JSON value can be any shape); a
+        # non-object body would previously fall into the `except TypeError`
+        # below via the failed subscription. Narrowing here keeps that same
+        # outcome while letting the field reads type-check.
+        if not isinstance(data, dict):
+            raise TrackiwiError("unexpected login response from trackiwi")
         try:
             server = data["server"]
             token = data["token"]
@@ -555,7 +572,7 @@ class Client:
         self.user_id = None
         return revoked
 
-    def _get_list(self, path: str, what: str) -> list:
+    def _get_list(self, path: str, what: str) -> list[Any]:
         """GET `path` and return the list of records it answers with.
 
         The one implementation behind all six read-only list endpoints. It was
@@ -580,11 +597,13 @@ class Client:
         data = _decode_json(body)
         if isinstance(data, list):
             return data
-        if isinstance(data, dict) and isinstance(data.get("data"), list):
-            return data["data"]
+        if isinstance(data, dict):
+            inner = data.get("data")
+            if isinstance(inner, list):
+                return inner
         raise TrackiwiError(f"unexpected {what} response from trackiwi")
 
-    def trackers(self) -> list[dict]:
+    def trackers(self) -> list[dict[str, Any]]:
         """List the account's trackers.
 
         **This output contains location data, not only device metadata.** Each
@@ -604,7 +623,7 @@ class Client:
         """
         return self._get_list("/api/v2/trackers", "trackers")
 
-    def tours(self) -> list[dict]:
+    def tours(self) -> list[dict[str, Any]]:
         """List the account's tours.
 
         Verified live: a bare JSON list whose records carry `color`,
@@ -612,7 +631,7 @@ class Client:
         """
         return self._get_list("/api/v2/tours", "tours")
 
-    def markers(self) -> list[dict]:
+    def markers(self) -> list[dict[str, Any]]:
         """List the account's markers.
 
         **The element shape is unverified.** The endpoint answered 200 with an
@@ -622,7 +641,7 @@ class Client:
         """
         return self._get_list("/api/v2/markers", "markers")
 
-    def marker_categories(self) -> list[dict]:
+    def marker_categories(self) -> list[dict[str, Any]]:
         """List the account's marker categories.
 
         Verified live: a bare JSON list whose records carry `color`, `id` and
@@ -630,7 +649,7 @@ class Client:
         """
         return self._get_list("/api/v2/marker_categories", "marker categories")
 
-    def alarms(self) -> list[dict]:
+    def alarms(self) -> list[dict[str, Any]]:
         """List the account's alarms.
 
         Verified live: a bare JSON list whose records carry `acknowledged`,
@@ -646,7 +665,7 @@ class Client:
         """
         return self._get_list("/api/v2/alarms", "alarms")
 
-    def shares(self) -> list[dict]:
+    def shares(self) -> list[dict[str, Any]]:
         """List the account's active shares.
 
         **The element shape is unverified**, for the same reason as
@@ -669,7 +688,9 @@ class Client:
     # shares and trackers (the trailing-slash variants of the paths above), and
     # for `PUT /api/v2/session/push_token`.
 
-    def sync(self, offset: int | None = None) -> Iterator[tuple[list[tuple], int, int | None]]:
+    def sync(
+        self, offset: int | None = None
+    ) -> Iterator[tuple[list[tuple[Any, ...]], int, int | None]]:
         """Yield `(rows, skipped, total)` batches until the server runs dry.
 
         Implements :need:`REQ_SYNC_RESUME`, :need:`REQ_SYNC_OFFSET_EXCLUSIVE`
