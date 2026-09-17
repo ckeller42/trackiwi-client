@@ -12,6 +12,7 @@ import os
 import platform
 import urllib.error
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
 
 from . import COLUMNS, __version__
@@ -243,3 +244,39 @@ class Client:
         self.token = None
         self.api_base = None
         self.user_id = None
+
+    def trackers(self) -> list[dict]:
+        """List the account's trackers.
+
+        The response envelope is not documented; both a bare list and a
+        `{"data": [...]}` wrapper are accepted (design spec, section 10.3).
+        """
+        status, _, body = self._api("GET", "/api/v2/trackers")
+        _check(status, body)
+        data = json.loads(body)
+        if isinstance(data, dict) and "data" in data:
+            return data["data"]
+        return data
+
+    def sync(self, offset: int | None = None) -> Iterator[tuple[list[tuple], int, int | None]]:
+        """Yield `(rows, skipped, total)` batches until the server runs dry.
+
+        Offset-based and therefore resumable: if this fails part-way, simply
+        running it again continues from the highest id already stored. That is
+        why there is no retry logic anywhere in this client.
+        """
+        total: int | None = None
+        while True:
+            payload = {"initial_sync": True} if offset is None else {"offset": offset}
+            status, headers, body = self._api(
+                "POST", "/api/v2/trackers/sync", body=payload, timeout=SYNC_TIMEOUT
+            )
+            _check(status, body)
+            if total is None:
+                raw_total = headers.get("trackiwi-position-count")
+                total = int(raw_total) if raw_total else None
+            rows, skipped = parse_positions(body.decode("utf-8", "replace"))
+            if not rows:
+                return
+            yield rows, skipped, total
+            offset = max(row[0] for row in rows)
