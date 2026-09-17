@@ -108,6 +108,40 @@ def test_non_advancing_offset_raises_instead_of_looping_forever():
         list(c.sync())
 
 
+# --- Token redaction (spec section 7.3: "redact it in any debug output") ---
+#
+# `_check`'s fallback interpolates the first 200 bytes of the server's body
+# into the message, which main() prints verbatim to stderr. Reverse proxies and
+# API gateways do echo request details — including request headers — into
+# error bodies, and that body is the only unbounded server-controlled string
+# this client ever prints.
+
+
+def test_bearer_header_echoed_in_an_error_body_is_redacted():
+    body = b"<html>502 upstream refused: Authorization: Bearer super-secret-token</html>"
+    c = client(FakeResponse(body, status=502))
+    with pytest.raises(TrackiwiError) as excinfo:
+        c.trackers()
+    message = str(excinfo.value)
+    assert "super-secret-token" not in message
+    assert "<redacted>" in message
+
+
+def test_the_sessions_own_token_echoed_in_an_error_body_is_redacted():
+    """The `Bearer` pattern does not catch a token echoed on its own, so the
+    concrete `self.token` value is scrubbed as well."""
+    c = Client(
+        api_base="https://api.example.invalid",
+        token="tok-secret-123",
+        opener=FakeOpener(FakeResponse(b'{"error":"token tok-secret-123 rejected"}', status=400)),
+    )
+    with pytest.raises(TrackiwiError) as excinfo:
+        c.trackers()
+    message = str(excinfo.value)
+    assert "tok-secret-123" not in message
+    assert "<redacted>" in message
+
+
 def test_non_json_trackers_response_becomes_a_trackiwierror_without_the_body():
     c = client(FakeResponse(b"<html>Authorization: Bearer super-secret-token</html>"))
     with pytest.raises(TrackiwiError) as excinfo:

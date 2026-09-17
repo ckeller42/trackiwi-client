@@ -11,6 +11,7 @@ import json
 import math
 import os
 import platform
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -138,8 +139,33 @@ def _header(headers: dict, name: str) -> str | None:
     return None
 
 
-def _check(status: int, body: bytes) -> None:
-    """Raise the right error for a non-2xx status, per the app's own handling."""
+#: Anything that looks like a bearer credential in server-controlled text.
+_BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
+
+
+def _redact(text: str, token: str | None = None) -> str:
+    """Strip bearer credentials from text that is about to be shown.
+
+    Spec section 7.3 requires the token to be redacted in any output. The one
+    place a token can plausibly re-enter output is an error body: proxies and
+    API gateways echo request details, including request headers, into 4xx/5xx
+    responses, and `_check` interpolates the first 200 bytes of the body into a
+    message the CLI prints to stderr — from where it reaches scrollback,
+    `script` captures, CI logs and bug reports.
+    """
+    text = _BEARER_RE.sub("Bearer <redacted>", text)
+    if token:
+        text = text.replace(token, "<redacted>")
+    return text
+
+
+def _check(status: int, body: bytes, token: str | None = None) -> None:
+    """Raise the right error for a non-2xx status, per the app's own handling.
+
+    `token`, when given, is this session's own token, scrubbed from the body
+    in addition to the generic `Bearer ...` pattern. `_check` is module-level
+    and so has no `self` to read it from.
+    """
     if status < 400:
         return
     if status in (401, 412):
@@ -152,7 +178,7 @@ def _check(status: int, body: bytes) -> None:
         raise TrackiwiError("rate limited by trackiwi — wait, then re-run", status=status)
     if status == 503:
         raise TrackiwiError("trackiwi is in maintenance — try again later", status=status)
-    detail = body[:200].decode("utf-8", "replace")
+    detail = _redact(body[:200].decode("utf-8", "replace"), token)
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
@@ -282,15 +308,24 @@ class Client:
     ) -> tuple[int, dict, bytes]:
         if not self.authenticated:
             raise AuthError("not logged in — run 'trackiwi login'")
-        return self._request(
-            method, f"{self.api_base}{path}", body=body, timeout=timeout, authed=True
-        )
+        try:
+            return self._request(
+                method, f"{self.api_base}{path}", body=body, timeout=timeout, authed=True
+            )
+        except TrackiwiError as error:
+            # Belt and braces: every authenticated failure that surfaces from
+            # below is scrubbed of this session's token before it travels any
+            # further, whatever produced the message.
+            message = _redact(str(error), self.token)
+            if message == str(error):
+                raise
+            raise type(error)(message, status=error.status) from None
 
     def login(self, email: str, password: str) -> dict:
         status, _, body = self._request(
             "POST", f"{WEBSITE}/api/login", body={"email": email, "password": password}
         )
-        _check(status, body)
+        _check(status, body, self.token)
         data = _decode_json(body)
         try:
             server = data["server"]
@@ -332,7 +367,7 @@ class Client:
         if self.authenticated:
             try:
                 status, _, body = self._api("DELETE", "/api/v2/session")
-                _check(status, body)
+                _check(status, body, self.token)
             except TrackiwiError:
                 revoked = False
         self.config_path.unlink(missing_ok=True)
@@ -350,7 +385,7 @@ class Client:
         the caller as if it were one.
         """
         status, _, body = self._api("GET", "/api/v2/trackers")
-        _check(status, body)
+        _check(status, body, self.token)
         data = _decode_json(body)
         if isinstance(data, list):
             return data
@@ -385,7 +420,7 @@ class Client:
             status, headers, body = self._api(
                 "POST", "/api/v2/trackers/sync", body=payload, timeout=SYNC_TIMEOUT
             )
-            _check(status, body)
+            _check(status, body, self.token)
             if total is None:
                 raw_total = _header(headers, "trackiwi-position-count")
                 if raw_total:
