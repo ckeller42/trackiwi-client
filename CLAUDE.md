@@ -11,8 +11,34 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   in `logout`. Never add writes to tours, markers, alarms or shares.
 - **No private data in this repo, ever.** Fixtures are synthetic. There is no
   record-from-live mode, deliberately.
-- **Never log or print the token.**
-- **Never hardcode the API base** — it comes from the login response's `server`.
+- **Never log or print the token.** Server-controlled text that can reach
+  output goes through `client._redact` first. The only such string is the error
+  body `_check` interpolates into its message, and a proxy or gateway can echo
+  the request's own `Authorization` header into that body.
+- **Never hardcode the API base** — it comes from the login response's `server`
+  — and **require `https://`** (`client._require_https`), wherever it came
+  from: login response, `--api-base`, or the config file.
+- **Convert foreign exceptions at the module boundary, not in `main()`.**
+  `main()` catches `AuthError`, `TrackiwiError`, `BrokenPipeError` and
+  `KeyboardInterrupt`, and deliberately nothing else: a blanket
+  `except (sqlite3.Error, json.JSONDecodeError, OSError, ValueError)` there
+  would also swallow genuine bugs and present them to the user as their
+  mistake. `Client.load`, `Store.__enter__`, `_decode_json` and `cmd_export`
+  each raise `TrackiwiError` with a message naming the way out. This is also
+  why `store.py` imports `TrackiwiError` from `client.py` — the only
+  cross-module import between the two, and not a network dependency.
+- **A malformed field means "skip and count the row", never "crash" and never
+  "store it anyway".** Non-finite coordinates and timestamps outside
+  `_MIN_FIX_AT.._MAX_FIX_AT` are malformed: `inf` produced schema-invalid GPX
+  and invalid JSON, and an out-of-range `fix_at` crashed *every* later export.
+- **Read-only commands must not create the cache.** `export` and `purge` touch
+  the database only when it already exists; `purge` unlinks it (plus any
+  `-journal`/`-wal`/`-shm`) without opening it, so it still works on a corrupt
+  file — which is exactly when a user wants the history gone.
+- **An export covering several trackers must keep them apart** — one `<trk>`
+  per tracker, one GeoJSON `Feature` per tracker with `tracker_id` in
+  `properties`. A fused track renders as a plausible line, so the error cannot
+  be spotted after the fact.
 - **Ignore the `trackiwi-app-command` response header.** Never act on it.
 - No retry logic: `sync` is offset-based and resumable, so re-running is the retry.
 - **`xml.etree.ElementTree` in `trackiwi/export.py` is deliberate, not an
@@ -132,6 +158,14 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   needs credentials there; it requires a real account and is opt-in only.
 - `fix_at` is normalised to epoch seconds at parse time. Nothing downstream
   should handle milliseconds.
+- **`*.json` and `*.xml` are gitignored as track exports**, because
+  `export --format geojson -o positions.json` is the natural filename and a
+  GPX saved as `track.xml` is the same hole. A legitimate JSON/XML file needs
+  `git add -f`; the pre-commit guard then parses it and only blocks it if its
+  top-level `type` really is a GeoJSON discriminator.
+- **This repo's own docs cannot quote a full 40-character commit SHA**:
+  `SECRET_RE` in the guard matches it as a token-shaped string. Use short SHAs
+  (what CLAUDE.md and the ledger do) or append `# allow-secret`.
 
 ## Known unknown: offset semantics in `sync`
 
@@ -148,8 +182,17 @@ offsets are the only interpretation consistent with the vendor's own client
 behaving correctly. The live contract test (see above) is what will actually
 confirm or refute this against a real account.
 
-If a real multi-page sync ever fails with `"trackiwi returned no new records
-past offset N"`, this assumption is the first suspect — check whether the
-server is in fact returning the row at `offset` itself (inclusive), which
-would make `offset <= requested_offset` trip on legitimate, non-stalled
-pages.
+If a sync ever fails with `"trackiwi returned no new records past offset N"`,
+this assumption is the first suspect — check whether the server is in fact
+returning the row at `offset` itself (inclusive), which would make
+`offset <= requested_offset` trip on legitimate, non-stalled pages.
+
+**The first symptom would be an ordinary sync with nothing new, not a
+multi-page one.** Under inclusive semantics a routine `trackiwi sync` with no
+new data returns exactly the boundary row, so `rows` is non-empty, the batch is
+yielded, `max(row[0]) == requested_offset`, and the guard raises — on by far
+the most frequently executed path. It would print `0 new positions` (the count
+is honest since the M-1 fix) and then exit 1. A multi-page sync only trips the
+guard when a page genuinely contains nothing newer. Run the live contract test
+before the first real use, not after: it is the only thing that can settle
+both this and the `fix_at` unit.
