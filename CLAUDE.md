@@ -26,8 +26,13 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 
 ## Workflow
 
-- Branch, then PR into `main`. Branch protection requires a PR; CodeRabbit
-  reviews it. Do not self-merge past unresolved CodeRabbit threads.
+- Branch, then PR into `main` — **by convention, not enforced.** Branch
+  protection cannot be enabled while the repo is private on the free plan
+  (the API returns 403 "Upgrade to GitHub Pro or make this repository
+  public"), so nothing mechanically stops a direct push to `main`. Treat the
+  PR workflow as binding anyway; see "Repo / CI setup" for the payload to
+  apply the moment the repo goes public or the plan changes.
+- Do not self-merge past unresolved CodeRabbit threads.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
 - Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` and `pytest`,
   mirroring CI exactly.
@@ -37,10 +42,35 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - GitHub: `ckeller42/trackiwi-client`, **private**. Sphinx docs, GitHub Pages
   and a licence are deliberately deferred until the repo is made public
   (Pages on a private repo needs a paid plan).
-- Branch protection on `main`: PR required, `required_approving_review_count:
-  0` (a solo owner cannot approve their own PR, so `1` would lock you out of
-  merging), `enforce_admins: true`, `required_conversation_resolution: true`
-  — the last one is what makes an unresolved CodeRabbit thread block merge.
+- Branch protection on `main`: **NOT currently active.** The API rejects it
+  on a private repo on the free plan:
+
+  ```
+  gh: Upgrade to GitHub Pro or make this repository public to enable
+  this feature. (HTTP 403)
+  ```
+
+  Apply this the moment the repo goes public (or the plan changes) — the
+  intended payload, kept here so it doesn't have to be re-derived:
+
+  ```bash
+  gh api repos/ckeller42/trackiwi-client/branches/main/protection \
+    -X PUT --input - <<'JSON'
+  {
+    "required_status_checks": {"strict": true, "contexts": ["test (3.11)", "test (3.13)"]},
+    "enforce_admins": true,
+    "required_pull_request_reviews": {"required_approving_review_count": 0},
+    "required_conversation_resolution": true,
+    "restrictions": null
+  }
+  JSON
+  ```
+
+  `required_approving_review_count: 0` is deliberate — a solo owner cannot
+  approve their own PR, so `1` would lock you out of merging. `enforce_admins:
+  true` is what stops the owner pushing straight past the rule.
+  `required_conversation_resolution: true` is what makes an unresolved
+  CodeRabbit thread block a merge.
 - **The CodeRabbit app install is a manual browser step** and cannot be
   automated: <https://github.com/apps/coderabbitai>. The committed
   `.coderabbit.yaml` only configures it once installed.
