@@ -18,6 +18,8 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from . import COLUMNS, __version__
+from . import AuthError as AuthError
+from . import TrackiwiError as TrackiwiError
 
 _FLOAT_COLUMNS = {"latitude", "longitude", "speed"}
 _REQUIRED_COLUMNS = ("id", "tracker_id", "fix_at", "latitude", "longitude")
@@ -35,18 +37,6 @@ _MILLISECOND_THRESHOLD = 10_000_000_000
 #: `normalize_epoch` divides by 1000 only once and the value lands here.
 _MIN_FIX_AT = 1
 _MAX_FIX_AT = 253402300799
-
-
-class TrackiwiError(Exception):
-    """Any failure talking to trackiwi."""
-
-    def __init__(self, message: str, status: int | None = None) -> None:
-        super().__init__(message)
-        self.status = status
-
-
-class AuthError(TrackiwiError):
-    """Credentials were rejected, or the session expired."""
 
 
 def normalize_epoch(value: int) -> int:

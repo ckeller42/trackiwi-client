@@ -1,10 +1,10 @@
 """Local SQLite cache of positions.
 
 This is the only module that touches the database. It performs no network I/O.
-The single import from `client.py` is the `TrackiwiError` type: the design spec
-(section 4) deliberately keeps one exception pair instead of a hierarchy, and a
-corrupt cache has to be reportable as a user-facing error rather than as a raw
-`sqlite3` exception.
+`TrackiwiError` comes from `trackiwi/__init__.py`, the shared-contract module,
+not from `client.py`: the design spec (section 4) deliberately keeps one
+exception pair instead of a hierarchy, and a corrupt cache has to be
+reportable as a user-facing error rather than as a raw `sqlite3` exception.
 
 The cache is a complete movement history of a physical vehicle, so the file is
 created owner-only inside an owner-only directory. See the design spec,
@@ -18,8 +18,7 @@ import sqlite3
 from collections.abc import Iterable
 from pathlib import Path
 
-from . import COLUMNS
-from .client import TrackiwiError
+from . import COLUMNS, TrackiwiError
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (

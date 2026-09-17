@@ -24,9 +24,10 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   `except (sqlite3.Error, json.JSONDecodeError, OSError, ValueError)` there
   would also swallow genuine bugs and present them to the user as their
   mistake. `Client.load`, `Store.__enter__`, `_decode_json` and `cmd_export`
-  each raise `TrackiwiError` with a message naming the way out. This is also
-  why `store.py` imports `TrackiwiError` from `client.py` — the only
-  cross-module import between the two, and not a network dependency.
+  each raise `TrackiwiError` with a message naming the way out. `TrackiwiError`
+  and `AuthError` live in `trackiwi/__init__.py` with the package's other
+  shared contracts (`__version__`, `COLUMNS`), so neither `client.py` nor
+  `store.py` imports the other to reach them.
 - **A malformed field means "skip and count the row", never "crash" and never
   "store it anyway".** Non-finite coordinates and timestamps outside
   `_MIN_FIX_AT.._MAX_FIX_AT` are malformed: `inf` produced schema-invalid GPX
