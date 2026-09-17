@@ -3,6 +3,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 .venv/bin/pre-commit run --all-files
+# Static type gate (strict; config in pyproject.toml). Run as a direct `mypy`
+# invocation rather than a pre-commit hook: the package is installed in this
+# venv, so mypy resolves the real `trackiwi`/`tools` sources and reads the
+# `[tool.mypy]` config, which mirrors-mypy's isolated environment cannot do
+# reliably. It checks the package, tools and tests in one pass.
+.venv/bin/mypy
 .venv/bin/pytest -v --cov=trackiwi --cov-report=term-missing --cov-fail-under=95
 # Doctests on the pure functions only. `--doctest-modules` runs each module's
 # docstring examples in that module's own namespace (unlike `sphinx-build -b

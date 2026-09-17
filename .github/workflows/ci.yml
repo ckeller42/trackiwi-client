@@ -39,6 +39,15 @@ jobs:
       - name: Gates (lint, format, private-data guard)
         if: matrix.python == '3.13'
         run: pre-commit run --all-files --show-diff-on-failure
+      # Static type gate (strict). Version-independent, so it runs ONCE on the
+      # target version, not across the matrix (house style). A direct `mypy`
+      # call over the installed package — not a mirrors-mypy pre-commit hook —
+      # so it type-checks the real sources and reads the [tool.mypy] config
+      # rather than an isolated hook environment. `python_version` in the config
+      # keeps the checked semantics at the 3.11 floor regardless of the runner.
+      - name: Type check (mypy strict)
+        if: matrix.python == '3.13'
+        run: mypy
 
   # Docs + traceability gate. Version-independent, so it runs ONCE on the target
   # version rather than across the matrix (house style). It builds the
