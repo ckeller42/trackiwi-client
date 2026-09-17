@@ -1,4 +1,5 @@
 import os
+import sqlite3
 import stat
 
 import pytest
@@ -74,3 +75,40 @@ def test_purge_removes_the_file(tmp_path):
 def test_default_path_respects_xdg(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     assert default_db_path() == tmp_path / "trackiwi" / "positions.db"
+
+
+def test_failed_batch_is_rolled_back(tmp_path):
+    path = tmp_path / "positions.db"
+    ok = (1, 7, 1758000000, 120, 31.0, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
+    null = (
+        2,
+        7,
+        1758000060,
+        120,
+        None,
+        -41.0,
+        12,
+        0.0,
+        0,
+        0,
+        -71,
+        9,
+        98,
+        4120,
+    )  # latitude NOT NULL
+    try:
+        with Store(path) as s:
+            s.upsert([ok, null])
+    except sqlite3.IntegrityError:
+        pass
+    with Store(path) as s:
+        assert s.count() == 0
+
+
+def test_permissions_are_self_healed(tmp_path):
+    path = tmp_path / "positions.db"
+    path.touch()
+    os.chmod(path, 0o644)
+    with Store(path) as s:
+        s.upsert([row(1)])
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600

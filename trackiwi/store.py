@@ -54,17 +54,18 @@ class Store:
     def __enter__(self) -> Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self.path.parent, 0o700)
-        existed = self.path.exists()
         self._conn = sqlite3.connect(self.path)
         self._conn.row_factory = sqlite3.Row
-        if not existed:
-            os.chmod(self.path, 0o600)
+        os.chmod(self.path, 0o600)
         self._conn.executescript(_SCHEMA)
         return self
 
-    def __exit__(self, *exc: object) -> None:
+    def __exit__(self, exc_type: type[BaseException] | None, *exc: object) -> None:
         if self._conn is not None:
-            self._conn.commit()
+            if exc_type is None:
+                self._conn.commit()
+            else:
+                self._conn.rollback()
             self._conn.close()
             self._conn = None
 
