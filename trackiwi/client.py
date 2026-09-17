@@ -7,6 +7,7 @@ SQLite or output formats.
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import urllib.error
@@ -46,7 +47,17 @@ def _coerce(column: str, raw: str) -> float | int | None:
     raw = raw.strip()
     if raw == "":
         return None
-    return float(raw) if column in _FLOAT_COLUMNS else int(raw)
+    if column not in _FLOAT_COLUMNS:
+        return int(raw)
+    value = float(raw)
+    if not math.isfinite(value):
+        # `float()` accepts "nan"/"inf"/"-inf", and nothing downstream catches
+        # them: `inf` yields schema-invalid GPX and invalid JSON, `nan` becomes
+        # NULL on insert and raises on the NOT NULL constraint. A non-finite
+        # coordinate is malformed data, so raise and let the caller skip and
+        # count the row like any other malformed field.
+        raise ValueError(f"non-finite value for {column}: {raw!r}")
+    return value
 
 
 def parse_positions(text: str) -> tuple[list[tuple], int]:

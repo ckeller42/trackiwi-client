@@ -64,7 +64,13 @@ def to_geojson(rows: Sequence) -> str:
                 },
             }
         )
-    return json.dumps({"type": "FeatureCollection", "features": features}, indent=2) + "\n"
+    # allow_nan=False: `Infinity`/`NaN` are not valid JSON (RFC 8259), so a
+    # non-finite coordinate must raise here rather than produce a document
+    # strict parsers reject wholesale.
+    return (
+        json.dumps({"type": "FeatureCollection", "features": features}, indent=2, allow_nan=False)
+        + "\n"
+    )
 
 
 def to_csv(rows: Sequence) -> str:

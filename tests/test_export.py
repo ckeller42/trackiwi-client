@@ -1,6 +1,8 @@
 import json
 import xml.etree.ElementTree as ET
 
+import pytest
+
 from trackiwi import COLUMNS
 from trackiwi.export import FORMATS, to_csv, to_geojson, to_gpx
 
@@ -65,6 +67,15 @@ def test_csv_has_header_and_rows():
     lines = to_csv([row(1), row(2)]).strip().splitlines()
     assert lines[0] == ",".join(COLUMNS)
     assert len(lines) == 3
+
+
+def test_geojson_refuses_to_emit_non_finite_coordinates():
+    """`Infinity` is not valid JSON (RFC 8259), so a strict parser rejects the
+    whole document. Second layer behind the parse-time finiteness check: a row
+    that reached the cache before that check existed must fail loudly here
+    rather than produce a file no parser accepts."""
+    with pytest.raises(ValueError):
+        to_geojson([row(1, lat=float("inf"))])
 
 
 def test_formats_registry_exposes_all_three():

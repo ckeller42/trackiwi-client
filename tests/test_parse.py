@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from trackiwi import COLUMNS
 from trackiwi.client import normalize_epoch, parse_positions
 
@@ -50,6 +52,28 @@ def test_row_missing_required_field_is_skipped():
 
 def test_non_numeric_field_is_skipped():
     rows, skipped = parse_positions("x,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    assert rows == []
+    assert skipped == 1
+
+
+@pytest.mark.parametrize("value", ["nan", "inf", "-inf", "Infinity", "NaN"])
+def test_non_finite_coordinate_is_skipped(value):
+    """A non-finite float is malformed data, not a position.
+
+    `float()` happily accepts "nan"/"inf", and neither the `None` check nor
+    SQLite's `NOT NULL` catches them: `inf` reaches the exporters and produces
+    schema-invalid GPX and syntactically invalid JSON, while `nan` becomes
+    NULL on insert and wedges the sync page forever.
+    """
+    rows, skipped = parse_positions(
+        f"1001,7,1758000000,120,{value},-41.5,12,0.0,0,0,-71,9,98,4120\n"
+    )
+    assert rows == []
+    assert skipped == 1
+
+
+def test_non_finite_speed_is_skipped():
+    rows, skipped = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,inf,0,0,-71,9,98,4120\n")
     assert rows == []
     assert skipped == 1
 
