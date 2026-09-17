@@ -42,35 +42,60 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - GitHub: `ckeller42/trackiwi-client`, **private**. Sphinx docs, GitHub Pages
   and a licence are deliberately deferred until the repo is made public
   (Pages on a private repo needs a paid plan).
-- Branch protection on `main`: **NOT currently active.** The API rejects it
-  on a private repo on the free plan:
+- Branch protection on `main`: **NOT active, and cannot be.** Both APIs that
+  could enforce it were tried and both return the same thing on a private
+  repo on the free plan:
 
   ```
-  gh: Upgrade to GitHub Pro or make this repository public to enable
-  this feature. (HTTP 403)
+  Upgrade to GitHub Pro or make this repository public to enable this
+  feature. (HTTP 403)
   ```
 
-  Apply this the moment the repo goes public (or the plan changes) — the
-  intended payload, kept here so it doesn't have to be re-derived:
+  That is `PUT /repos/{o}/{r}/branches/main/protection` (legacy branch
+  protection) **and** `POST /repos/{o}/{r}/rulesets` (the newer rulesets
+  API). **Do not spend time retrying either** — the gate is the plan, not the
+  payload. The owner's decision (2026-09-17) is to keep the repo private and
+  treat the workflow as convention.
+- **User requirement, currently unenforceable: a PR must not be merged while
+  any comment thread is unresolved.** Honour this by hand on every PR. It is
+  `required_review_thread_resolution` below, and it switches on by itself the
+  moment the repo goes public or the plan changes — at which point run:
 
   ```bash
-  gh api repos/ckeller42/trackiwi-client/branches/main/protection \
-    -X PUT --input - <<'JSON'
+  gh api repos/ckeller42/trackiwi-client/rulesets -X POST --input - <<'JSON'
   {
-    "required_status_checks": {"strict": true, "contexts": ["test (3.11)", "test (3.13)"]},
-    "enforce_admins": true,
-    "required_pull_request_reviews": {"required_approving_review_count": 0},
-    "required_conversation_resolution": true,
-    "restrictions": null
+    "name": "main: PR required, conversations resolved, CI green",
+    "target": "branch",
+    "enforcement": "active",
+    "bypass_actors": [],
+    "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+    "rules": [
+      { "type": "pull_request", "parameters": {
+          "required_approving_review_count": 0,
+          "dismiss_stale_reviews_on_push": false,
+          "require_code_owner_review": false,
+          "require_last_push_approval": false,
+          "required_review_thread_resolution": true,
+          "automatic_copilot_code_review_enabled": false,
+          "allowed_merge_methods": ["merge", "squash", "rebase"] } },
+      { "type": "required_status_checks", "parameters": {
+          "strict_required_status_checks_policy": true,
+          "do_not_enforce_on_create": false,
+          "required_status_checks": [
+            { "context": "test (3.11)" }, { "context": "test (3.13)" } ] } },
+    { "type": "deletion" },
+    { "type": "non_fast_forward" }
+    ]
   }
   JSON
   ```
 
-  `required_approving_review_count: 0` is deliberate — a solo owner cannot
-  approve their own PR, so `1` would lock you out of merging. `enforce_admins:
-  true` is what stops the owner pushing straight past the rule.
-  `required_conversation_resolution: true` is what makes an unresolved
-  CodeRabbit thread block a merge.
+  Rulesets are preferred over legacy branch protection here. Two parameters
+  are deliberate and should not be "corrected": `required_approving_review_count:
+  0`, because a solo owner cannot approve their own PR and `1` would lock them
+  out of merging entirely; and `bypass_actors: []`, which is the rulesets
+  equivalent of `enforce_admins: true` — without it the owner can push straight
+  past the rule, which defeats the point.
 - **The CodeRabbit app install is a manual browser step** and cannot be
   automated: <https://github.com/apps/coderabbitai>. The committed
   `.coderabbit.yaml` only configures it once installed.
