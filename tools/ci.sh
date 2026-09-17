@@ -3,4 +3,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 .venv/bin/pre-commit run --all-files
-.venv/bin/pytest -v
+.venv/bin/pytest -v --cov=trackiwi --cov-report=term-missing --cov-fail-under=95

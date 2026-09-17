@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "pre-commit>=3.7"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "pre-commit>=3.7", "detect-secrets>=1.5"]
 
 [project.scripts]
 trackiwi = "trackiwi.cli:main"
@@ -29,3 +29,19 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 markers = ["live: hits the real trackiwi API; requires TRACKIWI_LIVE=1"]
 addopts = "-m 'not live'"
+
+[tool.coverage.run]
+source = ["trackiwi"]
+# __main__.py is a 3-line entry-point shim for `python -m trackiwi`. It is
+# tested (tests/test_main_module.py runs it in a subprocess), but a subprocess
+# is invisible to in-process coverage, so measuring it here would always read
+# 0%. Omitted for that reason, not to inflate the number.
+omit = ["trackiwi/__main__.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

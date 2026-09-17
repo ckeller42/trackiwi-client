@@ -14,6 +14,14 @@ repos:
         args: [--fix]
       - id: ruff-format
         types_or: [python, pyi, jupyter]
+  # Maintained secret scanner, defence-in-depth alongside the home-rolled
+  # SECRET_RE in tools/check_no_private_data.py. The baseline holds only known
+  # synthetic/test fakes (hashed); any new token-shaped string not in it fails.
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
   - repo: local
     hooks:
       - id: no-private-data
