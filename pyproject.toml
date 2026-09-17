@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=68"]
+# setuptools>=77 understands the PEP 639 `license = "<SPDX>"` string form and
+# `license-files`; the older table form is deprecated under it.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +9,25 @@ name = "trackiwi"
 version = "0.1.0"
 description = "Read-only client for a personal trackiwi GPS account"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "pre-commit>=3.7", "detect-secrets>=1.5"]
+# The package itself has ZERO runtime dependencies; everything here is tooling.
+# sphinx-needs is pinned because its config API (needs_extra_links, needs_warnings,
+# the -W build-failure behaviour) is version-sensitive; sphinx is capped so a
+# future major cannot silently change the traceability gate.
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+    "detect-secrets>=1.5",
+    "sphinx>=8,<10",
+    "sphinx-needs==8.5.0",
+    "interrogate>=1.7",
+]
 
 [project.scripts]
 trackiwi = "trackiwi.cli:main"
@@ -45,3 +62,17 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
+
+[tool.interrogate]
+# Docstring-coverage gate. Measured 100% of the public surface with these
+# ignores in place, so `fail-under` sits at the measured value. Dunder, __init__,
+# nested and private `_` helpers are excluded (many private helpers ARE
+# documented, but they are not required to be); the public API must be 100%.
+fail-under = 100
+ignore-init-method = true
+ignore-magic = true
+ignore-private = true
+ignore-semiprivate = true
+ignore-nested-functions = true
+ignore-module = false
+exclude = ["tests", "docs", ".venv", "build", "dist"]
