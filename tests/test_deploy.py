@@ -91,3 +91,48 @@ def test_dockerignore_keeps_private_data_out_of_the_image():
     text = (ROOT / ".dockerignore").read_text()
     for pattern in (".venv", ".git", "*.db", "config.json", ".env", "deploy/.env"):
         assert pattern in text.splitlines(), pattern
+
+
+def _gitignore_private_patterns():
+    """The patterns under `.gitignore`'s "Private data" heading, negations excluded."""
+    lines = (ROOT / ".gitignore").read_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if "Private data" in line)
+    end = next(i for i, line in enumerate(lines) if i > start and line.startswith("# ---"))
+    return [
+        line.strip()
+        for line in lines[start + 1 : end]
+        if line.strip() and not line.startswith("#") and not line.startswith("!")
+    ]
+
+
+def test_dockerignore_mirrors_every_private_gitignore_pattern_at_any_depth():
+    """REQ_PORTABLE_CONFIG / REQ_NO_PRIVATE_DATA: an export in the clone never enters the build.
+
+    A `.dockerignore` pattern without `**/` matches only at the context root,
+    so each private `.gitignore` pattern must appear with the `**/` prefix.
+    """
+    patterns = _gitignore_private_patterns()
+    assert {"*.gpx", "*.geojson", "*.csv", "*.json", "*.db", ".env.*"} <= set(patterns)
+    lines = set((ROOT / ".dockerignore").read_text().splitlines())
+    missing = [p for p in patterns if f"**/{p}" not in lines]
+    assert not missing, f".dockerignore lacks **/ variants of: {missing}"
+
+
+def test_dockerfile_copies_only_what_the_build_needs():
+    """An allowlist: a COPY layer keeps whatever it copies, even after a later `rm`."""
+    allowed = {"pyproject.toml", "LICENSE", "trackiwi/"}
+    copies = [
+        line.split()[1:-1]
+        for line in (DEPLOY / "ingest" / "Dockerfile").read_text().splitlines()
+        if line.startswith(("COPY", "ADD"))
+    ]
+    assert copies, "the Dockerfile must copy the package"
+    for sources in copies:
+        assert set(sources) <= allowed, f"COPY of {sources} (allowed: {sorted(allowed)})"
+
+
+def test_systemd_service_reads_the_optional_influx_env_file():
+    """A user unit sees no shell-rc variables; the token must reach it another way."""
+    lines = (DEPLOY / "systemd" / "trackiwi-ingest.service").read_text().splitlines()
+    assert "EnvironmentFile=-%h/.config/trackiwi/influx.env" in lines
+    assert "ExecStart=%h/.local/bin/trackiwi ingest" in lines

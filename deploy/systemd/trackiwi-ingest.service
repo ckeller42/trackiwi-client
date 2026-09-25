@@ -1,11 +1,17 @@
 # User unit. Install: cp deploy/systemd/trackiwi-ingest.* ~/.config/systemd/user/
 #                     systemctl --user daemon-reload
 #                     systemctl --user enable --now trackiwi-ingest.timer
-# Assumes `trackiwi` was installed with `pip install --user` or pipx
-# (so it lives in ~/.local/bin) and ~/.config/trackiwi/influx.toml exists.
+# Assumes `trackiwi` was installed with `pipx install .` (or `pip install --user .`)
+# so it lives in ~/.local/bin; otherwise edit ExecStart to your own path.
+# Assumes ~/.config/trackiwi/influx.toml exists. A user unit does not see
+# variables exported in a shell rc: put the token in the optional
+# ~/.config/trackiwi/influx.env (mode 0600), one line such as
+#   TRACKIWI_INFLUX_TOKEN=...
+# (or the variable your token_env names), or use token_file in influx.toml.
 [Unit]
 Description=trackiwi ingest (sync from trackiwi, push to InfluxDB)
 
 [Service]
 Type=oneshot
+EnvironmentFile=-%h/.config/trackiwi/influx.env
 ExecStart=%h/.local/bin/trackiwi ingest
