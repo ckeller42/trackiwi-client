@@ -382,7 +382,8 @@ never runs in CI.
 1. **Python version on buspi.** The package needs Python 3.11 or later. buspi's
    readers run under `/home/pi/solix-env`, whose Python version was not verified
    (the Pi was unreachable during design). This is checked in the `buspi-config`
-   rollout, not here.
+   rollout, not here. Tracked as
+   [buspi-config#34](https://github.com/ckeller42/buspi-config/issues/34).
 2. **The meaning of `fix_flag`.** It is stored raw. If its meaning is ever
    confirmed, it can be renamed or given dashboard use without a migration
    (renaming a field only affects new points).
