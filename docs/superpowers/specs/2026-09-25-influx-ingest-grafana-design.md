@@ -210,7 +210,7 @@ The command is read-only. It never writes a point and never creates anything.
 | 404 on write (unknown database or bucket) | Names the configured database or bucket | 1 |
 | Other 4xx/5xx | Status plus the **redacted** response body | 1 |
 | Config missing or invalid | Names the file and the missing key | 1 |
-| `sync` fails inside `ingest` | `push` still runs for whatever is already cached, then the command exits 1 | 1 |
+| `sync` fails inside `ingest` | `push` still runs for whatever is already cached, then the command exits 1 | 1 (2 if the sync failed on authentication, matching every other command) |
 
 There is no retry loop. Re-running is the retry, exactly as with `sync`.
 
