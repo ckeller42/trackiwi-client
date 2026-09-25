@@ -95,7 +95,8 @@ Verifying tests
    :verifies: REQ_CONFIG_MODE_0600
 
    ``tests/test_client_auth.py::test_config_is_created_owner_only_without_relying_on_chmod``,
-   ``tests/test_client_auth.py::test_load_self_heals_a_widened_config``
+   ``tests/test_client_auth.py::test_load_self_heals_a_widened_config``,
+   ``tests/test_influx_config.py::test_load_narrows_a_widened_config_file``
 
 .. test:: The cache is 0600 in a 0700 directory and self-heals
    :id: TEST_CACHE_MODE_0600

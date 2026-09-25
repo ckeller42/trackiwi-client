@@ -123,8 +123,9 @@ Local cache & config
    :id: REQ_CONFIG_MODE_0600
    :tags: security, storage
 
-   The credentials file is created at mode 0600 and a widened mode is narrowed
-   back on load. (Design spec §7.3.)
+   The credentials file and the InfluxDB target config (``influx.toml``) are
+   kept at mode 0600, and a widened mode is narrowed back on load.
+   (Design spec §7.3; influx spec §5.6.)
 
 .. req:: The position cache is 0600 in a 0700 directory
    :id: REQ_CACHE_MODE_0600

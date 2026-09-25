@@ -116,6 +116,7 @@ module = [
     "test_client_reads",
     "test_client_sync",
     "test_export",
+    "test_influx_config",
     "test_invariants",
     "test_lineprotocol",
     "test_live",
