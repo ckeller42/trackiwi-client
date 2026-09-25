@@ -1,13 +1,22 @@
 """CLI wiring for InfluxDB: check, push, and ingest (push runs even if sync fails)."""
 
 import pytest
+from conftest import FakeOpener
 
 from trackiwi import AuthError, TrackiwiError, cli
+from trackiwi.client import Client
 from trackiwi.store import Store
 
 
 def _row(pid):
     return (pid, 7, 1700000000 + pid, 1, 31.0, -41.0, 12, 0.0, 90, 150, 5, 9, 99, 1287)
+
+
+def _cache_rows(*rows, names=None):
+    """Cache rows with tracker 7 named, as after any earlier successful `ingest`."""
+    with Store() as store:
+        store.upsert(list(rows))
+        store.set_tracker_names({7: "Bus"} if names is None else names)
 
 
 @pytest.fixture
@@ -46,7 +55,9 @@ def fake_writer(monkeypatch):
     monkeypatch.setattr("trackiwi.cli.InfluxWriter", FakeWriter)
 
 
-def _stub_client(batches=None, trackers=None, sync_error=None, authenticated=True):
+def _stub_client(
+    batches=None, trackers=None, sync_error=None, authenticated=True, trackers_error=None
+):
     class Stub:
         @classmethod
         def load(cls):
@@ -62,6 +73,8 @@ def _stub_client(batches=None, trackers=None, sync_error=None, authenticated=Tru
                 raise sync_error
 
         def trackers(self):
+            if trackers_error:
+                raise trackers_error
             return trackers or []
 
     return Stub
@@ -84,8 +97,7 @@ def test_push_without_cache_is_a_noop(env, capsys):
 
 
 def test_push_sends_cached_rows(env, capsys):
-    with Store() as store:
-        store.upsert([_row(1), _row(2)])
+    _cache_rows(_row(1), _row(2))
     assert cli.main(["influx", "push"]) == 0
     assert len(FakeWriter.instances[0].batches[0]) == 2
     assert "pushed 2 positions" in capsys.readouterr().out
@@ -109,8 +121,7 @@ def test_ingest_syncs_names_and_pushes(env, monkeypatch):
 
 
 def test_ingest_pushes_cached_rows_even_when_sync_fails(env, monkeypatch, capsys):
-    with Store() as store:
-        store.upsert([_row(1)])
+    _cache_rows(_row(1))
     monkeypatch.setattr(
         "trackiwi.cli.Client", _stub_client(sync_error=TrackiwiError("network error: down"))
     )
@@ -120,8 +131,7 @@ def test_ingest_pushes_cached_rows_even_when_sync_fails(env, monkeypatch, capsys
 
 
 def test_ingest_auth_failure_still_pushes_and_exits_two(env, monkeypatch):
-    with Store() as store:
-        store.upsert([_row(1)])
+    _cache_rows(_row(1))
     monkeypatch.setattr("trackiwi.cli.Client", _stub_client(authenticated=False))
     assert cli.main(["ingest"]) == 2
     assert len(FakeWriter.instances[0].batches[0]) == 1
@@ -135,3 +145,105 @@ def test_sync_command_still_works(env, monkeypatch, capsys):
 
 def test_auth_error_type_is_preserved():
     assert issubclass(AuthError, TrackiwiError)
+
+
+# --- Tracker names must be known before a push (final review I1) ------------
+
+
+class _NoTrackiwi:
+    """`influx push` is offline: any attempt to reach trackiwi fails the test."""
+
+    @classmethod
+    def load(cls, *args, **kwargs):
+        raise AssertionError("influx push must not contact trackiwi")
+
+
+def test_push_before_names_are_known_writes_nothing(env, monkeypatch, capsys):
+    _cache_rows(_row(1), _row(2), names={})
+    monkeypatch.setattr("trackiwi.cli.Client", _NoTrackiwi)
+    assert cli.main(["influx", "push"]) == 1
+    assert FakeWriter.instances[0].batches == []
+    err = capsys.readouterr().err
+    assert "no name known for tracker 7" in err
+    assert "trackiwi ingest" in err
+
+
+def test_ingest_whose_name_refresh_fails_pushes_no_id_tags(env, monkeypatch, capsys):
+    """The first ingest on a flaky link: sync worked, `trackers()` did not."""
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(
+            batches=[([_row(1)], 0, 1)], trackers_error=TrackiwiError("network error: down")
+        ),
+    )
+    assert cli.main(["ingest"]) == 1
+    assert FakeWriter.instances[0].batches == []
+
+
+# --- ingest reports each failure separately (final review M-ingest) ---------
+
+
+def test_ingest_reports_a_name_refresh_failure_as_such(env, monkeypatch, capsys):
+    _cache_rows(_row(1))
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(trackers_error=TrackiwiError("network error: down")),
+    )
+    assert cli.main(["ingest"]) == 1
+    err = capsys.readouterr().err
+    assert "tracker names not refreshed: network error: down" in err
+    assert "sync failed" not in err
+    # The names already stored from an earlier run still let the push go out.
+    assert len(FakeWriter.instances[0].batches[0]) == 1
+
+
+def test_ingest_refreshes_names_even_when_sync_fails(env, monkeypatch):
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(
+            trackers=[{"id": 7, "name": "Bus"}], sync_error=TrackiwiError("network error: down")
+        ),
+    )
+    with Store() as store:
+        store.upsert([_row(1)])
+    assert cli.main(["ingest"]) == 1
+    assert ",tracker_name=Bus " in FakeWriter.instances[0].batches[0][0]
+
+
+def test_ingest_sync_and_push_both_failing_keeps_the_sync_exit_code(env, monkeypatch, capsys):
+    _cache_rows(_row(1))
+
+    def refuse(self, lines):
+        raise TrackiwiError("InfluxDB write failed (HTTP 500): boom")
+
+    monkeypatch.setattr(FakeWriter, "write", refuse)
+    monkeypatch.setattr("trackiwi.cli.Client", _stub_client(authenticated=False))
+    assert cli.main(["ingest"]) == 2
+    err = capsys.readouterr().err
+    assert "push failed: InfluxDB write failed (HTTP 500): boom" in err
+    assert "authentication required" in err
+
+
+# --- A sync timeout still lets the push run (final review I2) ---------------
+
+
+def test_ingest_sync_timeout_still_pushes(env, monkeypatch, capsys):
+    """The real `Client` transport times out; the push must still run."""
+    _cache_rows(_row(1))
+
+    class TimingOut(Client):
+        @classmethod
+        def load(cls, *args, **kwargs):
+            return Client(
+                api_base="https://api.example.invalid",
+                token="tok",
+                user_id=42,
+                opener=FakeOpener(TimeoutError("timed out"), TimeoutError("timed out")),
+            )
+
+    monkeypatch.setattr("trackiwi.cli.Client", TimingOut)
+    assert cli.main(["ingest"]) == 1
+    assert len(FakeWriter.instances[0].batches[0]) == 1
+    err = capsys.readouterr().err
+    assert "sync failed" in err
+    assert "timed out" in err

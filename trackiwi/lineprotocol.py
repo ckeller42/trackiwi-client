@@ -75,7 +75,9 @@ def format_point(row: Row, tracker_name: str | None) -> str:
 
     `tracker_name` becomes the ``tracker_name`` tag; when it is missing or
     empty the tracker id is used instead, because InfluxDB rejects an empty
-    tag value. NULL optional columns are omitted rather than written.
+    tag value. That fallback exists for direct library use only: `mirror`
+    never sends a row without a stored name (:need:`REQ_MIRROR_IDEMPOTENT`).
+    NULL optional columns are omitted rather than written.
     Raises ``ValueError`` for a non-finite value.
     """
     tracker_id = int(row["tracker_id"])

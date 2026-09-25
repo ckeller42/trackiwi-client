@@ -13,9 +13,11 @@ from __future__ import annotations
 import base64
 import contextlib
 import gzip
+import http.client
 import json
 import os
 import re
+import sys
 import tomllib
 import urllib.error
 import urllib.parse
@@ -154,7 +156,26 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
 WRITE_TIMEOUT = 60
 USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
+_RETENTION_DROP = b"beyond retention policy"
 _AUTH_RE = re.compile(r"\b(Token|Bearer|Basic)\s+\S+", re.IGNORECASE)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect, so a 3xx comes back as an `HTTPError`.
+
+    Following one turned a login page behind an SSO proxy into a false write
+    acknowledgement, and urllib copies the ``Authorization`` header onto the
+    redirected request — to any host. See `InfluxWriter._request`.
+    """
+
+    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+        """Decline to build the redirected request."""
+        return None
+
+
+def _no_redirect_opener() -> urllib.request.OpenerDirector:
+    """A fresh opener that never follows redirects (one per writer)."""
+    return urllib.request.build_opener(_NoRedirect)
 
 
 def _header(headers: Mapping[str, str], name: str) -> str | None:
@@ -172,13 +193,16 @@ class InfluxWriter:
     Implements :need:`REQ_INFLUX_WRITE_SCOPE` (the only writes are POSTs of
     line protocol to the configured target's write endpoint) and
     :need:`REQ_INFLUX_TOKEN_REDACT` (credentials are scrubbed from every
-    message built from server-controlled text). `opener` exists so tests can
-    inject a fake transport, exactly as in `client.Client`.
+    message built from server-controlled text). Redirects are never
+    followed, so a 3xx is an error rather than an acknowledgement and the
+    credentials never travel to another address (:need:`REQ_MIRROR_RESUME`).
+    `opener` exists so tests can inject a fake transport, exactly as in
+    `client.Client`.
     """
 
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
         self.config = config
-        self.opener = opener or urllib.request.urlopen
+        self.opener = opener or _no_redirect_opener().open
         self._version = config.version
 
     # -- transport -----------------------------------------------------------
@@ -208,7 +232,13 @@ class InfluxWriter:
         data: bytes | None = None,
         headers: Mapping[str, str] | None = None,
     ) -> tuple[int, dict[str, str], bytes]:
-        """Perform one request and return ``(status, headers, body)``."""
+        """Perform one request and return ``(status, headers, body)``.
+
+        A 3xx raises: redirects are not followed (see `_NoRedirect`), and a
+        redirect must never be mistaken for an answer. Every transport failure
+        — including a timeout or reset while reading the response, which
+        urllib does not wrap in `URLError` — becomes a `TrackiwiError`.
+        """
         url = self.config.url + path
         if query:
             url += "?" + urllib.parse.urlencode(query)
@@ -220,13 +250,28 @@ class InfluxWriter:
         )
         try:
             with self.opener(request, timeout=WRITE_TIMEOUT) as response:
-                return response.status, dict(response.headers), response.read()
+                result = response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read()
+            result = error.code, dict(error.headers or {}), error.read()
         except urllib.error.URLError as error:
             raise TrackiwiError(
                 f"cannot reach InfluxDB at {self.config.url}: {error.reason}"
             ) from error
+        except (OSError, http.client.HTTPException) as error:
+            # Raised by getresponse()/read(): TimeoutError, ConnectionResetError,
+            # RemoteDisconnected, IncompleteRead. Nothing was acknowledged.
+            raise TrackiwiError(
+                f"cannot reach InfluxDB at {self.config.url}: "
+                f"{self._redact(str(error) or type(error).__name__)}"
+            ) from error
+        status, response_headers, _ = result
+        if 300 <= status < 400:
+            location = self._redact(_header(response_headers, "Location") or "(no Location)")
+            raise TrackiwiError(
+                f"InfluxDB at {self.config.url} answered HTTP {status}, a redirect to "
+                f"{location}; redirects are not followed — set url to the final address"
+            )
+        return result
 
     # -- version -------------------------------------------------------------
 
@@ -281,7 +326,11 @@ class InfluxWriter:
         return f"database '{self.config.database}'"
 
     def write(self, lines: Sequence[str]) -> None:
-        """POST one gzipped batch of line protocol; raise on any non-2xx."""
+        """POST one gzipped batch of line protocol; raise unless acknowledged.
+
+        Acknowledged means 2xx, or a 4xx whose body says the points were
+        "beyond retention policy" (dropped for good, reported on stderr).
+        """
         if not lines:
             return
         path, query = self._write_endpoint()
@@ -294,6 +343,18 @@ class InfluxWriter:
         status, _, response = self._request("POST", path, query=query, data=body, headers=headers)
         if 200 <= status < 300:
             return
+        detail = self._redact(response[:200].decode("utf-8", "replace"))
+        if 400 <= status < 500 and _RETENTION_DROP in response:
+            # A partial write: InfluxDB stored every point it could and dropped
+            # the ones older than the bucket's retention, which it will never
+            # accept. Refusing the batch would re-send it forever and stall the
+            # mirror behind it, so it counts as acknowledged (REQ_MIRROR_RESUME).
+            print(
+                f"warning: InfluxDB dropped points outside the retention of "
+                f"{self._target_name()} (HTTP {status}): {detail}",
+                file=sys.stderr,
+            )
+            return
         if status in (401, 403):
             raise TrackiwiError(
                 f"InfluxDB rejected the token or credentials (HTTP {status}) "
@@ -301,7 +362,6 @@ class InfluxWriter:
             )
         if status == 404:
             raise TrackiwiError(f"InfluxDB has no {self._target_name()} (HTTP 404)")
-        detail = self._redact(response[:200].decode("utf-8", "replace"))
         raise TrackiwiError(f"InfluxDB write failed (HTTP {status}): {detail}")
 
     # -- check ---------------------------------------------------------------
@@ -353,7 +413,7 @@ class WriterProtocol(Protocol):
         ...
 
     def write(self, lines: Sequence[str]) -> None:
-        """POST one gzipped batch of line protocol; raise on any non-2xx."""
+        """POST one gzipped batch of line protocol; raise unless acknowledged."""
         ...
 
 
@@ -365,8 +425,12 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
     not accepted, and a failure leaves earlier batches recorded. Implements
     :need:`REQ_MIRROR_IDEMPOTENT`: a row always becomes the same point (same
     tags, same timestamp), which InfluxDB overwrites rather than duplicates,
-    so re-sending is always safe. Returns the number of points sent; the first
-    failed batch re-raises its `TrackiwiError`.
+    so re-sending is always safe. That is why the ``tracker_name`` tag is only
+    ever the real name: a batch holding a row whose tracker has no stored name
+    is not sent at all (the mirror stops before it with a `TrackiwiError`),
+    because a placeholder tag would later split that tracker into two series.
+    Returns the number of points sent; the first failed batch re-raises its
+    `TrackiwiError`.
     """
     target = writer.target_key()
     last = store.mirror_position(target)
@@ -376,7 +440,14 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
         rows = store.rows_after(last, batch_size)
         if not rows:
             return sent
-        lines = [format_point(row, names.get(int(row["tracker_id"]))) for row in rows]
+        for row in rows:
+            tracker_id = int(row["tracker_id"])
+            if not names.get(tracker_id):
+                raise TrackiwiError(
+                    f"no name known for tracker {tracker_id} — run `trackiwi ingest` "
+                    "while trackiwi is reachable"
+                )
+        lines = [format_point(row, names[int(row["tracker_id"])]) for row in rows]
         writer.write(lines)
         last = int(rows[-1]["id"])
         store.set_mirror_position(target, last)

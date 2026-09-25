@@ -1,4 +1,5 @@
 import email.message
+import http.client
 import io
 import json
 import os
@@ -315,3 +316,52 @@ def test_forget_local_session_removes_the_config():
     assert Client.forget_local_session() is True
     assert not default_config_path().exists()
     assert Client.forget_local_session() is False
+
+
+# --- Transport failures outside URLError (final review I2) ---
+#
+# urllib wraps only the *send* in `URLError`. `getresponse()` and `read()`
+# raise raw `TimeoutError`, `ConnectionResetError` or an `http.client`
+# exception, which escaped as a traceback and, inside `ingest`, skipped the
+# push entirely.
+
+
+class _BrokenRead(FakeResponse):
+    """A response whose body read fails mid-transfer."""
+
+    def __init__(self, error):
+        super().__init__(b"", status=200)
+        self.error = error
+
+    def read(self, *args):
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TimeoutError("timed out"),
+        ConnectionResetError(54, "Connection reset by peer"),
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        _BrokenRead(TimeoutError("timed out")),
+        _BrokenRead(http.client.IncompleteRead(b"")),
+    ],
+    ids=["timeout", "reset", "remote-disconnected", "read-timeout", "incomplete-read"],
+)
+def test_transport_failures_become_trackiwierror_network_error(failure):
+    with pytest.raises(TrackiwiError, match="network error"):
+        Client(opener=FakeOpener(failure)).login("a@example.invalid", "pw")
+
+
+def test_transport_failure_on_an_authed_call_is_redacted():
+    """The token-scrubbing wrapper in `_api` still sees the converted error."""
+    c = Client(
+        api_base="https://api.example.invalid",
+        token="tok-abc",
+        opener=FakeOpener(
+            ConnectionResetError(54, "reset while sending tok-abc")  # pragma: allowlist secret
+        ),
+    )
+    with pytest.raises(TrackiwiError, match="network error") as excinfo:
+        c.trackers()
+    assert "tok-abc" not in str(excinfo.value)

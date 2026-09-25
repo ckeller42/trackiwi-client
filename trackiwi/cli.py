@@ -368,23 +368,41 @@ def cmd_influx_push(_: argparse.Namespace) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Sync from trackiwi, refresh tracker names, then push to InfluxDB.
 
-    The push runs even when the sync fails: the cache is the buffer, and
-    whatever is already in it should still reach InfluxDB. The sync's error is
-    re-raised afterwards so the exit code still reports it (2 for auth, 1 else).
+    The three steps fail independently. The push runs even when the sync or
+    the name refresh fails: the cache is the buffer, and whatever is already
+    in it should still reach InfluxDB. Each failure is reported on its own
+    ("sync failed" / "tracker names not refreshed"). The first trackiwi-side
+    error is re-raised afterwards so the exit code still reports it (2 for
+    auth, 1 else); when the push fails too, its error is printed and the
+    trackiwi-side error still decides the exit code.
     """
-    sync_error: TrackiwiError | None = None
+    trackiwi_error: TrackiwiError | None = None
+    client: Client | None = None
     try:
         client = Client.load()
         _sync_into_cache(client, full=False)
-        names = {int(t["id"]): str(t.get("name") or "") for t in client.trackers() if "id" in t}
-        with Store() as store:
-            store.set_tracker_names({k: v for k, v in names.items() if v})
     except TrackiwiError as error:
-        sync_error = error
+        trackiwi_error = error
         print(f"sync failed: {error}", file=sys.stderr)
-    _push()
-    if sync_error is not None:
-        raise sync_error
+    # Names are refreshed whether or not the sync got through: without them
+    # `mirror` refuses to push (it never writes an id as a placeholder name).
+    if client is not None and not isinstance(trackiwi_error, AuthError):
+        try:
+            trackers = client.trackers()
+            names = {int(t["id"]): str(t.get("name") or "") for t in trackers if "id" in t}
+            with Store() as store:
+                store.set_tracker_names({k: v for k, v in names.items() if v})
+        except TrackiwiError as error:
+            trackiwi_error = trackiwi_error or error
+            print(f"tracker names not refreshed: {error}", file=sys.stderr)
+    try:
+        _push()
+    except TrackiwiError as error:
+        if trackiwi_error is None:
+            raise
+        print(f"push failed: {error}", file=sys.stderr)
+    if trackiwi_error is not None:
+        raise trackiwi_error
     return 0
 
 

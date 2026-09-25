@@ -1,10 +1,15 @@
 """InfluxDB writer: version detection, exact write requests, errors, redaction."""
 
 import base64
+import email.message
 import gzip
+import http.client
+import io
 import json
 import urllib.error
 import urllib.parse
+import urllib.request
+import urllib.response
 from typing import Any
 
 import pytest
@@ -228,3 +233,166 @@ def test_check_v1_database_present():
     ).check()
     assert ok
     assert any("database 'trackiwi' found" in line for line in lines)
+
+
+# --- Redirects are errors, never acknowledgements (final review C1) ---------
+
+
+_LOGIN = (
+    "https://sso.example.invalid/login?next=/api/v2/write&t=tok-secret"  # pragma: allowlist secret
+)
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_a_redirect_on_write_is_an_error_not_an_ack(status):
+    """A 3xx answer (an SSO gate, a proxy) must never count as a write acknowledgement."""
+    opener = FakeOpener(
+        FakeResponse(b"<html>login</html>", status=status, headers={"Location": _LOGIN})
+    )
+    with pytest.raises(TrackiwiError, match="redirect") as excinfo:
+        InfluxWriter(_cfg(), opener=opener).write(["m f=1.0 1"])
+    message = str(excinfo.value)
+    assert "sso.example.invalid/login" in message
+    assert "set url" in message
+    assert "tok-secret" not in message
+    assert len(opener.calls) == 1
+
+
+def test_a_raised_redirect_http_error_is_an_error():
+    """What the no-redirect opener really produces: an `HTTPError` carrying the 3xx."""
+    headers = email.message.Message()
+    headers["Location"] = "https://sso.example.invalid/login"
+    error = urllib.error.HTTPError(
+        "http://influx.example.invalid:8086/api/v2/write", 302, "Found", headers, io.BytesIO(b"")
+    )
+    with pytest.raises(TrackiwiError, match="redirect"):
+        InfluxWriter(_cfg(), opener=FakeOpener(error)).write(["m f=1.0 1"])
+
+
+def test_a_redirect_on_ping_is_an_error():
+    opener = FakeOpener(FakeResponse(b"", status=301, headers={"Location": _LOGIN}))
+    with pytest.raises(TrackiwiError, match="redirect"):
+        InfluxWriter(_cfg(version=None), opener=opener).detect_version()
+
+
+def test_a_redirect_on_check_is_an_error():
+    opener = FakeOpener(FakeResponse(b"<html/>", status=302, headers={"Location": _LOGIN}))
+    with pytest.raises(TrackiwiError, match="redirect"):
+        InfluxWriter(_cfg(), opener=opener).check()
+
+
+class _Response(urllib.response.addinfourl):
+    """`addinfourl` plus the `msg` reason phrase `HTTPErrorProcessor` reads."""
+
+    def __init__(self, body, headers, url, code):
+        super().__init__(io.BytesIO(body), headers, url, code)
+        self.msg = "Found" if code == 302 else "OK"
+
+
+class _RedirectingHTTP(urllib.request.BaseHandler):
+    """Offline stand-in for a proxy: 302 to a login page, which then answers 200.
+
+    `handler_order` below the stock `HTTPHandler` (500) makes the opener ask
+    this handler first, so no socket is ever opened. It records what reached
+    it, which is exactly what a real server would have seen.
+    """
+
+    handler_order = 100
+
+    def __init__(self):
+        self.seen = []
+
+    def http_open(self, req):
+        self.seen.append((req.get_method(), req.full_url, req.get_header("Authorization")))
+        headers = http.client.HTTPMessage()
+        code = 200
+        if len(self.seen) == 1:
+            headers["Location"] = "http://sso.example.invalid/login"
+            code = 302
+        return _Response(b"<html/>", headers, req.full_url, code)
+
+
+def _default_director(writer):
+    # The default opener is the bound `open` of a per-writer `OpenerDirector`.
+    director = getattr(writer.opener, "__self__", None)
+    assert isinstance(director, urllib.request.OpenerDirector), writer.opener
+    return director
+
+
+def test_default_opener_never_follows_redirects():
+    """Real urllib, no network: the 302 surfaces as an error and nothing follows it."""
+    writer = InfluxWriter(_cfg())
+    fake = _RedirectingHTTP()
+    _default_director(writer).add_handler(fake)
+    with pytest.raises(TrackiwiError, match="redirect"):
+        writer.write(["m f=1.0 1"])
+    # One request only: the redirect was not followed, so the token went nowhere else.
+    assert [(method, url.split("?")[0]) for method, url, _ in fake.seen] == [
+        ("POST", "http://influx.example.invalid:8086/api/v2/write")
+    ]
+
+
+def test_each_writer_gets_its_own_director():
+    """Adding a handler to one writer's opener must not leak into another's."""
+    assert _default_director(InfluxWriter(_cfg())) is not _default_director(InfluxWriter(_cfg()))
+
+
+# --- Transport failures outside URLError (final review I2) ------------------
+
+
+class _BrokenRead(FakeResponse):
+    """A response whose body read fails, as `getresponse()`/`read()` do for real."""
+
+    def __init__(self, error):
+        super().__init__(b"", status=204)
+        self.error = error
+
+    def read(self, *args):
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        TimeoutError("timed out"),
+        ConnectionResetError(54, "Connection reset by peer"),
+        http.client.RemoteDisconnected("Remote end closed connection without response"),
+        _BrokenRead(TimeoutError("timed out")),
+        _BrokenRead(http.client.IncompleteRead(b"")),
+    ],
+    ids=["timeout", "reset", "remote-disconnected", "read-timeout", "incomplete-read"],
+)
+def test_transport_failures_become_clear_errors(failure):
+    opener = FakeOpener(failure)
+    with pytest.raises(TrackiwiError, match="cannot reach InfluxDB at http://influx.example"):
+        InfluxWriter(_cfg(), opener=opener).write(["m f=1.0 1"])
+
+
+# --- Points beyond the retention policy (final review I3) -------------------
+
+_RETENTION_V2 = (
+    b'{"code":"unprocessable entity","message":"failure writing points to database: '
+    b'partial write: points beyond retention policy dropped=3"}'
+)
+_RETENTION_V1 = b'{"error":"partial write: points beyond retention policy dropped=3"}'
+
+
+@pytest.mark.parametrize(
+    ("version", "status", "body"),
+    [(2, 422, _RETENTION_V2), (1, 400, _RETENTION_V1)],
+    ids=["v2-422", "v1-400"],
+)
+def test_points_beyond_retention_are_acknowledged_with_a_warning(version, status, body, capsys):
+    cfg = _cfg(version=version, database="trackiwi") if version == 1 else _cfg()
+    opener = FakeOpener(FakeResponse(body, status=status))
+    InfluxWriter(cfg, opener=opener).write(["m f=1.0 1"])  # returns: acknowledged
+    err = capsys.readouterr().err
+    assert "beyond retention policy dropped=3" in err
+    assert "warning" in err
+
+
+def test_other_422_still_fails():
+    body = b'{"code":"unprocessable entity","message":"field type conflict"}'
+    opener = FakeOpener(FakeResponse(body, status=422))
+    with pytest.raises(TrackiwiError, match="field type conflict"):
+        InfluxWriter(_cfg(), opener=opener).write(["m f=1.0 1"])

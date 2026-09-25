@@ -7,6 +7,7 @@ SQLite or output formats.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import math
 import os
@@ -450,7 +451,9 @@ class Client:
         """Perform one HTTP request and return `(status, headers, body)`.
 
         Implements :need:`REQ_IGNORE_APP_COMMAND`: any `trackiwi-app-command`
-        response header is returned unread and never acted on.
+        response header is returned unread and never acted on. Every transport
+        failure, including a timeout or reset while reading the response,
+        becomes a `TrackiwiError` ("network error: …").
         """
         headers = {
             "Accept": "application/json",
@@ -478,6 +481,13 @@ class Client:
             return error.code, dict(error.headers), error.read()
         except urllib.error.URLError as error:
             raise TrackiwiError(f"network error: {error.reason}") from error
+        except (OSError, http.client.HTTPException) as error:
+            # urllib wraps only the send in `URLError`; `getresponse()` and
+            # `read()` raise TimeoutError, ConnectionResetError,
+            # RemoteDisconnected or IncompleteRead unwrapped. Converted here so
+            # every caller (notably `ingest`, which must still push) sees a
+            # `TrackiwiError` instead of a traceback.
+            raise TrackiwiError(f"network error: {error or type(error).__name__}") from error
 
     def _api(
         self,
