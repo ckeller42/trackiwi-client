@@ -10,15 +10,22 @@ stored in the TOML file: the token comes from the variable named by
 
 from __future__ import annotations
 
+import base64
 import contextlib
+import gzip
+import json
 import os
+import re
 import tomllib
-from collections.abc import Mapping
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import TrackiwiError
+from . import TrackiwiError, __version__
 
 ENV_PREFIX = "TRACKIWI_INFLUX_"
 DEFAULT_TOKEN_ENV = "TRACKIWI_INFLUX_TOKEN"
@@ -141,3 +148,193 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
         password=password,
         token_env=token_env,
     )
+
+
+WRITE_TIMEOUT = 60
+USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
+_AUTH_RE = re.compile(r"\b(Token|Bearer|Basic)\s+\S+", re.IGNORECASE)
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    """Case-insensitive header lookup on a plain dict of headers."""
+    lname = name.lower()
+    for key, value in headers.items():
+        if key.lower() == lname:
+            return value
+    return None
+
+
+class InfluxWriter:
+    """Talks to one InfluxDB target: detect the version, write, check.
+
+    Implements :need:`REQ_INFLUX_WRITE_SCOPE` (the only writes are POSTs of
+    line protocol to the configured target's write endpoint) and
+    :need:`REQ_INFLUX_TOKEN_REDACT` (credentials are scrubbed from every
+    message built from server-controlled text). `opener` exists so tests can
+    inject a fake transport, exactly as in `client.Client`.
+    """
+
+    def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
+        self.config = config
+        self.opener = opener or urllib.request.urlopen
+        self._version = config.version
+
+    # -- transport -----------------------------------------------------------
+
+    def _redact(self, text: str) -> str:
+        """Scrub the token, the password and any auth header value."""
+        text = _AUTH_RE.sub(lambda m: f"{m.group(1)} <redacted>", text)
+        for secret in (self.config.token, self.config.password):
+            if secret:
+                text = text.replace(secret, "<redacted>")
+        return text
+
+    def _auth_headers(self) -> dict[str, str]:
+        """Authorization header for the detected version, if credentials exist."""
+        if self.version == 2 and self.config.token:
+            return {"Authorization": f"Token {self.config.token}"}
+        if self.version == 1 and self.config.username:
+            raw = f"{self.config.username}:{self.config.password or ''}".encode()
+            return {"Authorization": "Basic " + base64.b64encode(raw).decode("ascii")}
+        return {}
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        query: Mapping[str, str] | None = None,
+        data: bytes | None = None,
+        headers: Mapping[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Perform one request and return ``(status, headers, body)``."""
+        url = self.config.url + path
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
+        request = urllib.request.Request(
+            url,
+            data=data,
+            headers={"User-Agent": USER_AGENT, **(headers or {})},
+            method=method,
+        )
+        try:
+            with self.opener(request, timeout=WRITE_TIMEOUT) as response:
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as error:
+            return error.code, dict(error.headers or {}), error.read()
+        except urllib.error.URLError as error:
+            raise TrackiwiError(
+                f"cannot reach InfluxDB at {self.config.url}: {error.reason}"
+            ) from error
+
+    # -- version -------------------------------------------------------------
+
+    def detect_version(self) -> int:
+        """Read the major version from the ``X-Influxdb-Version`` header of ``/ping``."""
+        _, headers, _ = self._request("GET", "/ping")
+        raw = (_header(headers, "X-Influxdb-Version") or "").strip()
+        text = raw.lstrip("vV")
+        if text[:1] in ("1", "2"):
+            return int(text[0])
+        if raw.lower().startswith("cloud"):
+            return 2
+        raise TrackiwiError(
+            f"could not detect the InfluxDB version at {self.config.url} "
+            f"(X-Influxdb-Version: {raw or 'missing'}); set version = 1 or 2 in influx.toml"
+        )
+
+    @property
+    def version(self) -> int:
+        """The target's major version, detected on first use unless configured."""
+        if self._version is None:
+            self._version = self.detect_version()
+        return self._version
+
+    def target_key(self) -> str:
+        """Stable identity of this target for mirror bookkeeping; no secrets."""
+        if self.version == 2:
+            return f"{self.config.url}|v2|{self.config.org}/{self.config.bucket}"
+        return f"{self.config.url}|v1|{self.config.database}"
+
+    # -- write ---------------------------------------------------------------
+
+    def _write_endpoint(self) -> tuple[str, dict[str, str]]:
+        """Path and query for a write, validating the settings it needs."""
+        cfg = self.config
+        if self.version == 2:
+            if not cfg.token:
+                raise TrackiwiError(
+                    f"InfluxDB 2.x needs a token: set ${cfg.token_env} or token_file"
+                )
+            if not cfg.org or not cfg.bucket:
+                raise TrackiwiError("InfluxDB 2.x needs 'org' and 'bucket' configured")
+            return "/api/v2/write", {"org": cfg.org, "bucket": cfg.bucket, "precision": "s"}
+        if not cfg.database:
+            raise TrackiwiError("InfluxDB 1.x needs 'database' configured")
+        return "/write", {"db": cfg.database, "precision": "s"}
+
+    def _target_name(self) -> str:
+        """Human name of the write destination, for error messages."""
+        if self.version == 2:
+            return f"bucket '{self.config.bucket}' in org '{self.config.org}'"
+        return f"database '{self.config.database}'"
+
+    def write(self, lines: Sequence[str]) -> None:
+        """POST one gzipped batch of line protocol; raise on any non-2xx."""
+        if not lines:
+            return
+        path, query = self._write_endpoint()
+        body = gzip.compress("\n".join(lines).encode("utf-8"))
+        headers = {
+            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Encoding": "gzip",
+            **self._auth_headers(),
+        }
+        status, _, response = self._request("POST", path, query=query, data=body, headers=headers)
+        if 200 <= status < 300:
+            return
+        if status in (401, 403):
+            raise TrackiwiError(
+                f"InfluxDB rejected the token or credentials (HTTP {status}) "
+                f"for {self._target_name()}"
+            )
+        if status == 404:
+            raise TrackiwiError(f"InfluxDB has no {self._target_name()} (HTTP 404)")
+        detail = self._redact(response[:200].decode("utf-8", "replace"))
+        raise TrackiwiError(f"InfluxDB write failed (HTTP {status}): {detail}")
+
+    # -- check ---------------------------------------------------------------
+
+    def check(self) -> tuple[bool, list[str]]:
+        """Probe connectivity, version and auth. Read-only: writes nothing."""
+        lines = [f"InfluxDB {self.version}.x at {self.config.url}"]
+        if self.version == 2:
+            status, _, body = self._request(
+                "GET",
+                "/api/v2/buckets",
+                query={"org": self.config.org or "", "name": self.config.bucket or ""},
+                headers=self._auth_headers(),
+            )
+            if status == 401:
+                return False, [*lines, "token rejected (HTTP 401)"]
+            if status == 403:
+                return True, [*lines, "auth OK, bucket not verifiable (write-only token)"]
+            if status != 200:
+                detail = self._redact(body[:200].decode("utf-8", "replace"))
+                return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
+            found = json.loads(body or b"{}").get("buckets") or []
+            if any(b.get("name") == self.config.bucket for b in found):
+                return True, [*lines, f"bucket '{self.config.bucket}' found"]
+            return False, [*lines, f"bucket '{self.config.bucket}' not found"]
+        status, _, body = self._request(
+            "GET", "/query", query={"q": "SHOW DATABASES"}, headers=self._auth_headers()
+        )
+        if status in (401, 403):
+            return False, [*lines, f"credentials rejected (HTTP {status})"]
+        if status != 200:
+            detail = self._redact(body[:200].decode("utf-8", "replace"))
+            return False, [*lines, f"database lookup failed (HTTP {status}): {detail}"]
+        series = (json.loads(body).get("results") or [{}])[0].get("series") or [{}]
+        names = {row[0] for row in series[0].get("values") or []}
+        if self.config.database in names:
+            return True, [*lines, f"database '{self.config.database}' found"]
+        return False, [*lines, f"database '{self.config.database}' not found"]

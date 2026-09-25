@@ -165,6 +165,19 @@ Verifying tests
    ``tests/test_store_mirror.py::test_mirror_position_is_per_target_and_persists``,
    ``tests/test_store_mirror.py::test_existing_cache_gains_the_new_tables``
 
+.. test:: Only the write endpoint receives POSTs
+   :id: TEST_INFLUX_WRITE_SCOPE
+   :verifies: REQ_INFLUX_WRITE_SCOPE
+
+   ``tests/test_influx_writer.py::test_only_write_endpoints_receive_posts``,
+   ``tests/test_influx_writer.py::test_v2_write_request_is_exact``
+
+.. test:: InfluxDB credentials are redacted from errors
+   :id: TEST_INFLUX_TOKEN_REDACT
+   :verifies: REQ_INFLUX_TOKEN_REDACT
+
+   ``tests/test_influx_writer.py::test_token_and_password_are_redacted_from_error_bodies``
+
 Requirement → test table
 ------------------------
 

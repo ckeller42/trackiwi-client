@@ -23,9 +23,11 @@ Safety & privacy
    :id: REQ_READONLY
    :tags: safety
 
-   The only state-changing request the client may issue is
-   ``DELETE /api/v2/session`` (logout). No call may alter trackers, alarms,
-   tours, markers or shares. (Design spec §7.5.)
+   Against the **trackiwi API**, the only state-changing request the client
+   may issue is ``DELETE /api/v2/session`` (logout). No call may alter
+   trackers, alarms, tours, markers or shares. (Design spec §7.5; rescoped by
+   influx spec §3.2 — writes to the user's own InfluxDB are bounded
+   separately by REQ_INFLUX_WRITE_SCOPE.)
 
 .. req:: No private data in the repository
    :id: REQ_NO_PRIVATE_DATA
@@ -202,3 +204,18 @@ Mirror
    Mirror to InfluxDB is resumable: every row mirrored to a target is tracked by
    id, so re-running continues from the highest id already acknowledged, losing
    no data when the network or InfluxDB is unavailable. (Influx spec §5.1, §5.2.)
+
+.. req:: InfluxDB writes are bounded to one measurement and one target
+   :id: REQ_INFLUX_WRITE_SCOPE
+   :tags: safety, influx
+
+   The only writes to InfluxDB are POSTs of ``trackiwi_position`` line
+   protocol to the configured target's write endpoint (``/api/v2/write`` or
+   ``/write``). No deletes, no schema or bucket management. (Influx spec §3.2.)
+
+.. req:: InfluxDB credentials are never shown
+   :id: REQ_INFLUX_TOKEN_REDACT
+   :tags: privacy, security, influx
+
+   The InfluxDB token and password never appear in output: every message
+   built from server-controlled text is redacted first. (Influx spec §5.6.)
