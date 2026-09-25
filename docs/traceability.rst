@@ -147,6 +147,15 @@ Verifying tests
    ``tests/test_client_auth.py::test_logout_revokes_then_deletes_config``,
    ``tests/test_client_auth.py::test_logout_clears_local_state_even_if_revoke_fails``
 
+.. test:: Line protocol uses natural units and escapes tags
+   :id: TEST_LINEPROTOCOL_UNITS
+   :verifies: REQ_LINEPROTOCOL_UNITS
+
+   ``tests/test_lineprotocol.py::test_full_row_formats_with_natural_units``,
+   ``tests/test_lineprotocol.py::test_tag_value_escapes_space_comma_equals``,
+   ``tests/test_lineprotocol.py::test_null_optional_columns_are_omitted``,
+   ``tests/test_lineprotocol.py::test_non_finite_value_is_rejected``
+
 Requirement → test table
 ------------------------
 

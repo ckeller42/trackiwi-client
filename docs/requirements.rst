@@ -181,3 +181,12 @@ Export
    ``logout`` revokes the session server-side (``DELETE /api/v2/session``) and,
    when it cannot, still removes the local credentials and warns that the token
    may remain valid. (Design spec §7.3.)
+
+.. req:: Positions are written to InfluxDB in natural units
+   :id: REQ_LINEPROTOCOL_UNITS
+   :tags: influx, data
+
+   Each cached row becomes one ``trackiwi_position`` line-protocol point with
+   tags ``tracker_id`` and ``tracker_name`` and fields in natural units
+   (distance in metres, voltage in volts). NULL optional columns are omitted,
+   tag values are escaped, and non-finite values are rejected. (Influx spec §4.)
