@@ -25,8 +25,9 @@ Get trackiwi position and telemetry data into InfluxDB and show it in Grafana:
    `deploy/.env.example`, run `docker compose up`, and see their own trackiwi
    data in a provisioned Grafana dashboard. No host, token, tracker id or
    location from the author's deployment appears anywhere in the repository.
-2. A user who already runs InfluxDB (1.x or 2.x) can instead point the ingest at
-   it with `~/.config/trackiwi/influx.toml` and a systemd timer, then import the
+2. A user who already runs InfluxDB can instead point the ingest at it (1.x or
+   2.x) with `~/.config/trackiwi/influx.toml` and a systemd timer, then (on 2.x
+   or InfluxDB Cloud) import the
    dashboard JSON.
 3. The ingest survives long connectivity gaps. Losing the network or InfluxDB
    for hours or days loses no data; the next successful run catches up.
@@ -53,9 +54,14 @@ Get trackiwi position and telemetry data into InfluxDB and show it in Grafana:
   showed as "active" in Tailscale while dropping 100% of packets, and it was
   unreachable over SSH on three consecutive attempts. The design treats long
   offline periods as normal, not exceptional.
-- The InfluxDB version on buspi is not yet known (the host was unreachable). The
-  design therefore targets **1.x and 2.x equally** and detects the version at
-  run time.
+- The reference deployment (buspi, per the `buspi-config` repository) runs
+  **InfluxDB 2.x** in Docker (`org=home`, bucket `buspi`, infinite retention) and
+  a local Grafana. That bucket replicates to InfluxDB Cloud and Grafana Cloud via
+  Edge Data Replication. **Every existing buspi dashboard is written in Flux**
+  (68 of 68 queries, local and cloud).
+- The **ingest** supports InfluxDB 1.x and 2.x; the version is detected at run
+  time. Supporting 1.x costs little: only the write endpoint and auth differ.
+  The **dashboard** is Flux, and so targets 2.x and InfluxDB Cloud only (§8).
 
 ## 3. Architecture
 
@@ -179,10 +185,19 @@ the trackiwi side.
 
 ### 5.4 `influx check`
 
-Reports connectivity, the detected version, whether authentication works, and,
-on 2.x, **whether a DBRP mapping exists for the bucket**. If the mapping is
-missing, it prints the exact `influx v1 dbrp create …` command to create it. The
-command is read-only: it probes and reports, and never creates anything.
+Reports connectivity and the detected version (`/ping`), then checks
+authentication:
+
+- **2.x:** `GET /api/v2/buckets?org=…&name=…`.
+  - 200 with the bucket present → OK.
+  - 200 without it → "bucket not found".
+  - 401 → token rejected.
+  - 403 → the token is valid but cannot read bucket metadata, which is normal
+    for a write-only token. The check reports "auth OK, bucket not verifiable"
+    rather than failing.
+- **1.x:** `GET /query?q=SHOW DATABASES` with the configured credentials.
+
+The command is read-only. It never writes a point and never creates anything.
 
 ### 5.5 Error handling
 
@@ -228,6 +243,12 @@ token_file = "~/.config/trackiwi/influx.token"   # or TRACKIWI_INFLUX_TOKEN
 - Every key can be overridden by an environment variable named
   `TRACKIWI_INFLUX_<KEY>`. Precedence: environment > file > default. Docker
   configures the ingest entirely through the environment.
+- **`token_env`**: the name of an environment variable holding the token. The
+  default is `TRACKIWI_INFLUX_TOKEN`. A deployment that already keeps its token
+  under another name points at it instead, e.g. buspi's
+  `token_env = "INFLUXDB_TOKEN"`, which comes from its `secrets.env`. This avoids
+  copying the secret or adding wrapper scripts. Token resolution order:
+  the variable named by `token_env`, then `token_file`.
 - The repository commits only `examples/influx.example.toml` and
   `deploy/.env.example`, both containing placeholders. `influx.toml`,
   `influx.token`, `influx.password` and `deploy/.env` are git-ignored and covered
@@ -244,12 +265,11 @@ test enforces this for the committed example and template files.
 `deploy/docker-compose.yml` defines three services:
 
 - **`influxdb`** (`influxdb:2`): initialised from `DOCKER_INFLUXDB_INIT_*`
-  variables in `.env`, with an init script that creates the DBRP mapping for
-  InfluxQL.
+  variables in `.env` (org, bucket, admin token).
 - **`grafana`**: provisioned from `deploy/grafana/provisioning/`. This includes
-  one InfluxQL datasource, with its token substituted from the environment
-  rather than committed, and one dashboard provider that loads the committed
-  dashboard.
+  one **Flux** InfluxDB datasource, with its token substituted from the
+  environment rather than committed, and one dashboard provider that loads the
+  committed dashboard.
 - **`ingest`**: a Python slim image that installs this repository and runs
   `trackiwi ingest` every `TRACKIWI_INGEST_INTERVAL` seconds (default 600). The
   trackiwi session is created with `trackiwi login --token -` from environment
@@ -261,8 +281,31 @@ test enforces this for the committed example and template files.
 `deploy/systemd/trackiwi-ingest.service` and `trackiwi-ingest.timer` are
 **user** units. They use `%h` and `ExecStart=%h/.local/bin/trackiwi ingest`,
 with no hosts or absolute user paths, and run every 10 minutes with
-`Persistent=true` so a missed run catches up after the machine wakes. This is
-the buspi route: its existing InfluxDB, `influx.toml`, and the timer.
+`Persistent=true` so a missed run catches up after the machine wakes. They are
+the generic route for anyone who already runs InfluxDB.
+
+### 7.3 The reference deployment lives outside this repository
+
+buspi is **not** configured from this repository. Its rollout is a separate
+change in the `buspi-config` repository, following that repository's
+conventions:
+
+- a **system** service/timer using
+  `EnvironmentFile=/etc/buspi/secrets.env`;
+- `token_env = "INFLUXDB_TOKEN"`;
+- bucket `buspi` and org `home`;
+- `# -> /etc/…` destination headers;
+- a README config-table entry;
+- repository and Pi kept in sync.
+
+Writing into bucket `buspi` means trackiwi data is replicated to InfluxDB Cloud
+and Grafana Cloud by the existing Edge Data Replication, with nothing extra to
+configure. This is what keeps the portable setup free of any buspi dependency:
+the dependency runs the other way (`buspi-config` consumes `trackiwi-client`).
+
+Out of scope here, possible follow-up in `buspi-config`: panels that compare
+trackiwi positions with the router's own GPS (`geoinflux`), in the same way the
+existing Victron-vs-camper voltage panels compare two sources.
 
 ## 8. Dashboard
 
@@ -271,12 +314,17 @@ compose stack and importable into any Grafana.
 
 **Portability rules (`REQ_DASHBOARD_PORTABLE`, new):**
 
-- The datasource is referenced through an input/variable (`${DS_TRACKIWI}`).
-  There are no hardcoded datasource UIDs.
+- The datasource is referenced through an input/variable (`${DS_TRACKIWI}`,
+  type InfluxDB, Flux mode). There are no hardcoded datasource UIDs.
+- The bucket is a `bucket` dashboard variable (default `trackiwi`; buspi sets
+  `buspi`). No query hardcodes a bucket name.
 - The tracker is selected with a `tracker` template variable
-  (`SHOW TAG VALUES FROM trackiwi_position WITH KEY = "tracker_name"`).
+  (`schema.tagValues(bucket: v.bucket, tag: "tracker_name", predicate: (r) => r._measurement == "trackiwi_position")`).
 - The file contains no real tracker ids, names, coordinates or hostnames.
-- All queries use InfluxQL, which works on 1.x and on 2.x with a DBRP mapping.
+- All queries are **Flux**. This works on InfluxDB 2.x and InfluxDB Cloud, and
+  matches the datasources buspi's local Grafana and Grafana Cloud already use,
+  so neither needs a new datasource. InfluxDB 1.x users can still ingest, but
+  they need to write their own dashboard (stated in the README).
 
 **Layout: three rows.**
 
@@ -303,8 +351,9 @@ All existing gates stay green: tests, coverage ≥ 95, mypy strict, interrogate
 | Version detection | `/ping` header parsing for 1.x and 2.x; explicit version skips `/ping` |
 | Mirror resume | Batch 2 of 3 fails → `last_id` equals the end of batch 1; the rerun sends only batches 2 and 3; a duplicate rerun is harmless |
 | Config | File < environment precedence; `token_file` and `~` expansion; missing key names the key; mode `0600` self-heal |
-| CLI | `influx check` output for OK, missing DBRP, and auth failure; `ingest` runs `push` after a failed `sync` and exits 1 |
-| Dashboard JSON | Parses; three rows and the required panels present; no hardcoded datasource UID; no real values (uses the same shapes as the private-data guard) |
+| Config (`token_env`) | Token read from the variable named by `token_env`; falls back to `token_file`; missing both → clear error naming both |
+| CLI | `influx check` output for OK, bucket not found, write-only token (403 → "auth OK, bucket not verifiable"), and auth failure; `ingest` runs `push` after a failed `sync` and exits 1 |
+| Dashboard JSON | Parses; three rows and the required panels present; every query is Flux and uses `v.bucket` (no literal bucket); no hardcoded datasource UID; no real values (uses the same shapes as the private-data guard) |
 | Deploy files | Compose and provisioning YAML parse; `.env.example` has placeholders for every variable the compose file references; systemd units contain no absolute user paths |
 
 New requirements, each traced to a verifying test in `docs/requirements.rst`:
@@ -320,8 +369,9 @@ never runs in CI.
 ## 10. Documentation
 
 - **README:** new "InfluxDB & Grafana" section describing both routes (compose
-  and systemd/bring-your-own), the DBRP note for 2.x, and the minimum Grafana
-  version.
+  and systemd/bring-your-own), `token_env`, the minimum Grafana version, and
+  that the dashboard is Flux (InfluxDB 2.x / Cloud) while ingest also supports
+  1.x.
 - **`CLAUDE.md`:** the new module boundaries (`influx.py` is the only module
   talking to InfluxDB), the rescoped read-only rule, the mirror-resume
   invariant, and the rule that deployment specifics stay out of the repository.
@@ -329,11 +379,14 @@ never runs in CI.
 
 ## 11. Open questions
 
-1. **buspi's InfluxDB version and whether Grafana is already installed there.**
-   The host was unreachable during design. `trackiwi influx check` answers the
-   version on first deploy. If buspi already runs Grafana, it imports the
-   dashboard JSON; if not, the compose file's `grafana` service can run on its
-   own there.
+1. **Python version on buspi.** The package needs Python 3.11 or later. buspi's
+   readers run under `/home/pi/solix-env`, whose Python version was not verified
+   (the Pi was unreachable during design). This is checked in the `buspi-config`
+   rollout, not here.
 2. **The meaning of `fix_flag`.** It is stored raw. If its meaning is ever
    confirmed, it can be renamed or given dashboard use without a migration
    (renaming a field only affects new points).
+
+Resolved during design, from the `buspi-config` repository: buspi runs
+InfluxDB 2.x and a local Grafana, and all of its dashboards are Flux. The query
+language was changed from InfluxQL to Flux as a result.
