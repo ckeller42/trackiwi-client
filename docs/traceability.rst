@@ -186,6 +186,14 @@ Verifying tests
 
    ``tests/test_influx_mirror.py::test_resending_produces_identical_lines``
 
+.. test:: Deployment templates are placeholder-only and complete
+   :id: TEST_PORTABLE_CONFIG
+   :verifies: REQ_PORTABLE_CONFIG
+
+   ``tests/test_deploy.py::test_no_real_values_in_templates``,
+   ``tests/test_deploy.py::test_example_env_values_are_placeholders``,
+   ``tests/test_deploy.py::test_every_compose_variable_is_in_example_env``
+
 Requirement → test table
 ------------------------
 

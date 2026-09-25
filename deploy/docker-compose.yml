@@ -1,0 +1,63 @@
+# Turnkey stack: InfluxDB 2 + Grafana + trackiwi ingest.
+#   cp deploy/example.env deploy/.env      # then replace every changeme value
+#   docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
+#   docker compose -f deploy/docker-compose.yml up -d
+# Grafana: http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD)
+services:
+  influxdb:
+    image: influxdb:2
+    restart: unless-stopped
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_ADMIN_USER}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+      - influxdb-config:/etc/influxdb2
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      INFLUXDB_ORG: ${INFLUXDB_ORG}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+      - ./grafana-dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
+  ingest:
+    build:
+      context: ..
+      dockerfile: deploy/ingest/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - influxdb
+    environment:
+      TRACKIWI_INFLUX_URL: http://influxdb:8086
+      TRACKIWI_INFLUX_VERSION: "2"
+      TRACKIWI_INFLUX_ORG: ${INFLUXDB_ORG}
+      TRACKIWI_INFLUX_BUCKET: ${INFLUXDB_BUCKET}
+      TRACKIWI_INFLUX_TOKEN: ${INFLUXDB_TOKEN}
+      TRACKIWI_INGEST_INTERVAL: ${TRACKIWI_INGEST_INTERVAL:-600}
+    volumes:
+      # Holds ~/.config/trackiwi (session) and ~/.local/share/trackiwi (the
+      # cache that buffers positions while InfluxDB is unreachable).
+      - trackiwi-state:/home/trackiwi
+
+volumes:
+  influxdb-data:
+  influxdb-config:
+  grafana-data:
+  trackiwi-state:

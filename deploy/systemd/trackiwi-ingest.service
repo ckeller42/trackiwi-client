@@ -1,0 +1,11 @@
+# User unit. Install: cp deploy/systemd/trackiwi-ingest.* ~/.config/systemd/user/
+#                     systemctl --user daemon-reload
+#                     systemctl --user enable --now trackiwi-ingest.timer
+# Assumes `trackiwi` was installed with `pip install --user` or pipx
+# (so it lives in ~/.local/bin) and ~/.config/trackiwi/influx.toml exists.
+[Unit]
+Description=trackiwi ingest (sync from trackiwi, push to InfluxDB)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/trackiwi ingest

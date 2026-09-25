@@ -227,3 +227,12 @@ Mirror
    A cached row always becomes the same point — same measurement, tags and
    timestamp — so re-sending (including a full backfill) overwrites rather
    than duplicates. (Influx spec §4.)
+
+.. req:: Committed deployment templates carry no deployment's specifics
+   :id: REQ_PORTABLE_CONFIG
+   :tags: privacy, portability, influx
+
+   No file under ``deploy/`` or ``examples/`` contains a hostname, IP
+   address, credential, tracker id or coordinate from any real deployment;
+   values are placeholders, and every variable the compose file uses is
+   defined in ``deploy/example.env``. (Influx spec §6.)

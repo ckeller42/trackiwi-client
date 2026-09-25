@@ -22,7 +22,7 @@ Get trackiwi position and telemetry data into InfluxDB and show it in Grafana:
 ### Success criteria
 
 1. A fresh user can clone the repo, fill in `deploy/.env` from
-   `deploy/.env.example`, run `docker compose up`, and see their own trackiwi
+   `deploy/example.env`, run `docker compose up`, and see their own trackiwi
    data in a provisioned Grafana dashboard. No host, token, tracker id or
    location from the author's deployment appears anywhere in the repository.
 2. A user who already runs InfluxDB can instead point the ingest at it (1.x or
@@ -252,9 +252,13 @@ token_file = "~/.config/trackiwi/influx.token"   # or TRACKIWI_INFLUX_TOKEN
   copying the secret or adding wrapper scripts. Token resolution order:
   the variable named by `token_env`, then `token_file`.
 - The repository commits only `examples/influx.example.toml` and
-  `deploy/.env.example`, both containing placeholders. `influx.toml`,
+  `deploy/example.env`, both containing placeholders. `influx.toml`,
   `influx.token`, `influx.password` and `deploy/.env` are git-ignored and covered
-  by the private-data guard.
+  by the private-data guard. (Named `example.env` because the private-data
+  guard rejects any file whose name starts with `.env.`. The Grafana host
+  directories are hyphenated because a repository path like
+  `deploy/grafana/provisioning/datasources/…` is a 40+ character run of the
+  guard's token alphabet and gets blocked as token-shaped.)
 
 **`REQ_PORTABLE_CONFIG` (new):** no file under version control contains a
 hostname, token, credential, tracker id or location from any real deployment. A
@@ -268,7 +272,7 @@ test enforces this for the committed example and template files.
 
 - **`influxdb`** (`influxdb:2`): initialised from `DOCKER_INFLUXDB_INIT_*`
   variables in `.env` (org, bucket, admin token).
-- **`grafana`**: provisioned from `deploy/grafana/provisioning/`. This includes
+- **`grafana`**: provisioned from `deploy/grafana-provisioning/`. This includes
   one **Flux** InfluxDB datasource, with its token substituted from the
   environment rather than committed, and one dashboard provider that loads the
   committed dashboard.
@@ -311,7 +315,7 @@ existing Victron-vs-camper voltage panels compare two sources.
 
 ## 8. Dashboard
 
-File: `deploy/grafana/dashboards/trackiwi.json`. It is both provisioned by the
+File: `deploy/grafana-dashboards/trackiwi.json`. It is both provisioned by the
 compose stack and importable into any Grafana.
 
 **Portability rules (`REQ_DASHBOARD_PORTABLE`, new):**

@@ -1,0 +1,14 @@
+.venv
+.git
+.pytest_cache
+.ruff_cache
+.mypy_cache
+docs/_build
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+config.json
+.env
+deploy/.env
+.superpowers
