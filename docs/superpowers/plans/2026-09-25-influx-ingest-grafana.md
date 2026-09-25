@@ -2271,7 +2271,12 @@ Append to `docs/traceability.rst`:
    ``tests/test_deploy.py::test_every_compose_variable_is_in_example_env``
 ```
 
-In `docs/superpowers/specs/2026-09-25-influx-ingest-grafana-design.md`, replace every `deploy/.env.example` with `deploy/example.env`, and add this sentence at the end of §6's bullet about committed files: "(Named `example.env` because the private-data guard rejects any file whose name starts with `.env.`.)"
+In `docs/superpowers/specs/2026-09-25-influx-ingest-grafana-design.md`, make these changes:
+
+- Replace every `deploy/.env.example` with `deploy/example.env`.
+- Replace `deploy/grafana/provisioning/` with `deploy/grafana-provisioning/`.
+- Replace `deploy/grafana/dashboards/` with `deploy/grafana-dashboards/`.
+- Add this sentence at the end of §6's bullet about committed files: "(Named `example.env` because the private-data guard rejects any file whose name starts with `.env.`. The Grafana host directories are hyphenated because a repository path like `deploy/grafana/provisioning/datasources/…` is a 40+ character run of the guard's token alphabet and gets blocked as token-shaped.)"
 
 - [ ] **Step 7: Run the full gate**
 
