@@ -35,7 +35,8 @@ Verifying tests
    :verifies: REQ_TOKEN_NEVER_LOGGED
 
    ``tests/test_client_sync.py::test_the_sessions_own_token_echoed_in_an_error_body_is_redacted``,
-   ``tests/test_client_sync.py::test_bearer_header_echoed_in_an_error_body_is_redacted``
+   ``tests/test_client_sync.py::test_bearer_header_echoed_in_an_error_body_is_redacted``,
+   ``tests/test_client_auth.py::test_transport_failure_on_an_authed_call_is_redacted``
 
 .. test:: Login stores the server-supplied API base
    :id: TEST_API_BASE_FROM_LOGIN
@@ -165,7 +166,21 @@ Verifying tests
    ``tests/test_store_mirror.py::test_mirror_position_is_per_target_and_persists``,
    ``tests/test_store_mirror.py::test_existing_cache_gains_the_new_tables``,
    ``tests/test_influx_mirror.py::test_failed_batch_does_not_advance_state``,
-   ``tests/test_influx_mirror.py::test_only_new_rows_are_sent_after_more_sync``
+   ``tests/test_influx_mirror.py::test_only_new_rows_are_sent_after_more_sync``,
+   ``tests/test_influx_mirror.py::test_a_batch_beyond_retention_advances_the_position``,
+   ``tests/test_influx_writer.py::test_a_redirect_on_write_is_an_error_not_an_ack``,
+   ``tests/test_influx_writer.py::test_a_raised_redirect_http_error_is_an_error``,
+   ``tests/test_influx_writer.py::test_a_redirect_on_ping_is_an_error``,
+   ``tests/test_influx_writer.py::test_a_redirect_on_check_is_an_error``,
+   ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects``,
+   ``tests/test_influx_writer.py::test_each_writer_gets_its_own_director``,
+   ``tests/test_influx_writer.py::test_transport_failures_become_clear_errors``,
+   ``tests/test_influx_writer.py::test_points_beyond_retention_are_acknowledged_with_a_warning``,
+   ``tests/test_influx_writer.py::test_other_422_still_fails``,
+   ``tests/test_client_auth.py::test_transport_failures_become_trackiwierror_network_error``,
+   ``tests/test_cli_influx.py::test_ingest_sync_timeout_still_pushes``,
+   ``tests/test_cli_influx.py::test_ingest_reports_a_name_refresh_failure_as_such``,
+   ``tests/test_cli_influx.py::test_ingest_sync_and_push_both_failing_keeps_the_sync_exit_code``
 
 .. test:: Only the write endpoint receives POSTs
    :id: TEST_INFLUX_WRITE_SCOPE
@@ -178,13 +193,22 @@ Verifying tests
    :id: TEST_INFLUX_TOKEN_REDACT
    :verifies: REQ_INFLUX_TOKEN_REDACT
 
-   ``tests/test_influx_writer.py::test_token_and_password_are_redacted_from_error_bodies``
+   ``tests/test_influx_writer.py::test_token_and_password_are_redacted_from_error_bodies``,
+   ``tests/test_influx_writer.py::test_a_redirect_on_write_is_an_error_not_an_ack`` (the
+   redirect target is redacted),
+   ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects`` (the token
+   never travels to a redirect target)
 
 .. test:: Re-sending produces identical points
    :id: TEST_MIRROR_IDEMPOTENT
    :verifies: REQ_MIRROR_IDEMPOTENT
 
-   ``tests/test_influx_mirror.py::test_resending_produces_identical_lines``
+   ``tests/test_influx_mirror.py::test_resending_produces_identical_lines``,
+   ``tests/test_influx_mirror.py::test_rows_without_a_stored_name_stop_before_their_batch``,
+   ``tests/test_influx_mirror.py::test_no_names_at_all_sends_nothing``,
+   ``tests/test_cli_influx.py::test_push_before_names_are_known_writes_nothing``,
+   ``tests/test_cli_influx.py::test_ingest_whose_name_refresh_fails_pushes_no_id_tags``,
+   ``tests/test_cli_influx.py::test_ingest_refreshes_names_even_when_sync_fails``
 
 .. test:: Deployment templates are placeholder-only and complete
    :id: TEST_PORTABLE_CONFIG
@@ -192,7 +216,10 @@ Verifying tests
 
    ``tests/test_deploy.py::test_no_real_values_in_templates``,
    ``tests/test_deploy.py::test_example_env_values_are_placeholders``,
-   ``tests/test_deploy.py::test_every_compose_variable_is_in_example_env``
+   ``tests/test_deploy.py::test_every_compose_variable_is_in_example_env``,
+   ``tests/test_deploy.py::test_dockerignore_mirrors_every_private_gitignore_pattern_at_any_depth``,
+   ``tests/test_deploy.py::test_dockerfile_copies_only_what_the_build_needs``,
+   ``tests/test_deploy.py::test_systemd_service_reads_the_optional_influx_env_file``
 
 .. test:: Dashboard uses variables only and holds no real values
    :id: TEST_DASHBOARD_PORTABLE

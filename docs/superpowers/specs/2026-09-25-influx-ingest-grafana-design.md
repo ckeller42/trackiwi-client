@@ -166,8 +166,14 @@ The cache also gains a `tracker_names` table (`tracker_id INTEGER PRIMARY KEY, n
 
 1. Read cache rows with `id > last_id` for the target, ordered by `id`.
 2. Send them in batches of up to 5,000 lines. Each batch is one gzipped POST.
-3. **Only after a batch returns 2xx**, set `last_id` to the highest id in that
-   batch and commit.
+3. **Only after a batch is acknowledged**, set `last_id` to the highest id in
+   that batch and commit. Acknowledged means 2xx, or a 4xx partial write whose
+   body says the points were "beyond retention policy" (those points can never
+   be stored; a warning goes to stderr). A 3xx is never an acknowledgement:
+   redirects are not followed (§5.5).
+   Before sending a batch, every row in it must have a stored tracker name; if
+   one does not, push stops there without sending that batch, so the
+   `tracker_name` tag is always the real name (`REQ_MIRROR_IDEMPOTENT`).
 4. Stop at the first failure. Rows from earlier batches stay mirrored; the
    failed batch and everything after it are retried on the next run.
 
@@ -205,12 +211,17 @@ The command is read-only. It never writes a point and never creates anything.
 
 | Condition | Behaviour | Exit code |
 |---|---|---|
-| InfluxDB unreachable or timing out | Clear message; cache retains data; next run resumes | 1 |
+| InfluxDB unreachable or timing out (including a timeout, reset or disconnect while reading the response; the trackiwi transport converts the same failures) | Clear message, never a traceback; cache retains data; next run resumes | 1 |
+| Any 3xx redirect (e.g. an SSO or login proxy in front of InfluxDB) | Redirects are never followed, so the credentials never reach another address and a login page is never taken for an acknowledgement: "answered HTTP 3xx, a redirect to <redacted Location>; set url to the final address". The position does not advance | 1 |
+| Write answered 4xx with "points beyond retention policy" (a partial write; 2.x 422, 1.x 400) | Acknowledged with dropped points: the batch counts as written and the position advances (the dropped points can never be stored); a warning with InfluxDB's redacted message goes to stderr | 0 |
+| A batch holds a row whose tracker has no stored name | `push` stops before that batch (earlier batches keep their progress): "no name known for tracker N — run `trackiwi ingest` while trackiwi is reachable". The tag is never a placeholder id. `influx push` stays offline | 1 |
 | 401/403 | "InfluxDB rejected the token or credentials" | 1 |
 | 404 on write (unknown database or bucket) | Names the configured database or bucket | 1 |
 | Other 4xx/5xx | Status plus the **redacted** response body | 1 |
 | Config missing or invalid | Names the file and the missing key | 1 |
-| `sync` fails inside `ingest` | `push` still runs for whatever is already cached, then the command exits 1 | 1 (2 if the sync failed on authentication, matching every other command) |
+| `sync` fails inside `ingest` | "sync failed: …"; tracker names are still refreshed and `push` still runs for whatever is already cached, then the command exits with the sync's error | 1 (2 if the sync failed on authentication, matching every other command) |
+| The tracker-name refresh fails inside `ingest` | "tracker names not refreshed: …" (reported separately from a sync failure); `push` still runs with the names already stored | 1 |
+| `sync` and `push` both fail inside `ingest` | The push error is printed as "push failed: …" and the sync error is re-raised, so its exit code wins | 1 (2 if the sync failed on authentication) |
 
 There is no retry loop. Re-running is the retry, exactly as with `sync`.
 
@@ -278,6 +289,9 @@ test enforces this for the committed example and template files.
   committed dashboard.
 - **`ingest`**: a Python slim image that installs this repository and runs
   `trackiwi ingest` every `TRACKIWI_INGEST_INTERVAL` seconds (default 600). The
+  Dockerfile copies only what the build needs (`pyproject.toml`, `LICENSE`,
+  `trackiwi/`), because a `COPY` layer keeps whatever it copies; `.dockerignore`
+  also mirrors every private `.gitignore` pattern with a `**/` prefix. The
   trackiwi session is created with `trackiwi login --token -` from environment
   variables, or read from a mounted config volume. The cache lives on a named
   volume, so the buffer survives container restarts.
@@ -286,7 +300,9 @@ test enforces this for the committed example and template files.
 
 `deploy/systemd/trackiwi-ingest.service` and `trackiwi-ingest.timer` are
 **user** units. They use `%h` and `ExecStart=%h/.local/bin/trackiwi ingest`,
-with no hosts or absolute user paths, and run every 10 minutes with
+with no hosts or absolute user paths, read the token from the optional
+`EnvironmentFile=-%h/.config/trackiwi/influx.env` (a user unit does not see
+variables exported in a shell rc), and run every 10 minutes with
 `Persistent=true` so a missed run catches up after the machine wakes. They are
 the generic route for anyone who already runs InfluxDB.
 
@@ -361,7 +377,7 @@ All existing gates stay green: tests, coverage ≥ 95, mypy strict, interrogate
 | Config (`token_env`) | Token read from the variable named by `token_env`; falls back to `token_file`; missing both → clear error naming both |
 | CLI | `influx check` output for OK, bucket not found, write-only token (403 → "auth OK, bucket not verifiable"), and auth failure; `ingest` runs `push` after a failed `sync` and exits 1 |
 | Dashboard JSON | Parses; three rows and the required panels present; every query is Flux and uses `"${bucket}"`; no hardcoded datasource UID; no real values (uses the same shapes as the private-data guard) |
-| Deploy files | Compose and provisioning YAML parse; `example.env` has placeholders for every variable the compose file references; systemd units contain no absolute user paths |
+| Deploy files | Compose and provisioning YAML parse; `example.env` has placeholders for every variable the compose file references; systemd units contain no absolute user paths and read the optional `influx.env`; `.dockerignore` mirrors every private `.gitignore` pattern at any depth; the Dockerfile copies only an allowlist |
 
 New requirements, each traced to a verifying test in `docs/requirements.rst`:
 `REQ_INFLUX_WRITE_SCOPE`, `REQ_MIRROR_RESUME`, `REQ_MIRROR_IDEMPOTENT`,
