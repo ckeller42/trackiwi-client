@@ -402,15 +402,16 @@ never runs in CI.
 
 ## 11. Open questions
 
-1. **Python version on buspi.** The package needs Python 3.11 or later. buspi's
-   readers run under `/home/pi/solix-env`, whose Python version was not verified
-   (the Pi was unreachable during design). This is checked in the `buspi-config`
-   rollout, not here. Tracked as
-   [buspi-config#34](https://github.com/ckeller42/buspi-config/issues/34).
-2. **The meaning of `fix_flag`.** It is stored raw. If its meaning is ever
+1. **The meaning of `fix_flag`.** It is stored raw. If its meaning is ever
    confirmed, it can be renamed or given dashboard use without a migration
    (renaming a field only affects new points).
 
 Resolved during design, from the `buspi-config` repository: buspi runs
 InfluxDB 2.x and a local Grafana, and all of its dashboards are Flux. The query
 language was changed from InfluxQL to Flux as a result.
+
+Resolved on 2026-09-25 by checking buspi directly
+([buspi-config#34](https://github.com/ckeller42/buspi-config/issues/34), closed):
+`solix-env` and the system both run **Python 3.13.5**, above the 3.11 floor.
+The InfluxDB server's `/ping` returns `X-Influxdb-Version: v2.9.1`, which
+`version = "auto"` detects as 2.x.
