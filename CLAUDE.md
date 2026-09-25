@@ -86,6 +86,18 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   security scanners will flag `xml.etree` anyway; that flag is a false
   positive in this codebase and should not be "fixed" by adding the
   dependency.
+- **`influx.py` is the only module that talks to InfluxDB**, `lineprotocol.py`
+  is pure. `influx.py` and `client.py` never import each other.
+- **Read-only means read-only against trackiwi.** InfluxDB writes are allowed
+  only as `trackiwi_position` line protocol to the one configured target
+  (`REQ_INFLUX_WRITE_SCOPE`). Never add deletes, bucket management or other
+  measurements.
+- **Mirror invariant:** `mirror_state` advances only after InfluxDB
+  acknowledges a batch (`REQ_MIRROR_RESUME`) — same discipline as `sync`.
+- **Deployment specifics never enter this repo.** `deploy/` and `examples/`
+  hold placeholders only (`REQ_PORTABLE_CONFIG`); a real deployment (e.g.
+  buspi) is configured from its own repo, which consumes this package. The env
+  template is `deploy/example.env` because the guard rejects `.env.*` names.
 
 ## Workflow
 
@@ -232,6 +244,15 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - `tools/check_no_private_data.py` must stay Python 3.9-compatible: the
   pre-commit hook runs it via `language: system` → `python3`, which on this
   machine is 3.9.6, not the venv.
+- `pre-commit run --all-files` (and so `./tools/ci.sh`) only checks git-tracked
+  files: a new file gets a false green until it is `git add`-ed. Stage new files
+  before running the gate.
+- A **new test module** must be added to the `[[tool.mypy.overrides]]` `module`
+  list in `pyproject.toml`, or strict mypy rejects its unannotated test functions.
+- `*.json` is git-ignored (a GeoJSON export named `.json` must never be
+  committed); the dashboard is re-included by `!deploy/grafana-dashboards/*.json`.
+- Grafana Flux queries use `"${bucket}"` / `"${tracker}"` for dashboard
+  variables; only built-ins (`v.timeRangeStart`, `v.windowPeriod`) are `v.*`.
 - `pytest` skips live tests by default (`addopts = -m 'not live'`). Run them
   with:
 

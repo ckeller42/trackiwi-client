@@ -204,6 +204,43 @@ two consequences worth knowing:
   previous export untouched — where a plain `open(path, "w")` would have
   succeeded.
 
+## InfluxDB & Grafana
+
+`trackiwi ingest` syncs from trackiwi into the local cache, then mirrors every
+position not yet sent into InfluxDB (measurement `trackiwi_position`). The cache
+is the buffer: if InfluxDB or the network is down, positions wait in the cache
+and the next run catches up. Re-sending is harmless (same point, same
+timestamp), and the first run is the full backfill.
+
+```bash
+trackiwi influx check   # connectivity, version, auth — read-only
+trackiwi influx push    # send cached positions not yet mirrored
+trackiwi ingest         # sync + push; what the timer/container runs
+```
+
+### Option A — turnkey stack (Docker Compose)
+
+```bash
+cp deploy/example.env deploy/.env        # replace every "changeme" value
+docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+Grafana runs at <http://localhost:3000> with the **trackiwi** dashboard already
+provisioned. The ingest container runs every `TRACKIWI_INGEST_INTERVAL` seconds.
+
+### Option B — your own InfluxDB (systemd timer)
+
+1. Copy `examples/influx.example.toml` to `~/.config/trackiwi/influx.toml` (mode 0600) and fill it in.
+2. Put the token into the environment variable named by `token_env` (default `TRACKIWI_INFLUX_TOKEN`), or into the file named by `token_file`. Never put it in `influx.toml`.
+3. Run `trackiwi influx check`.
+4. Install the user timer from `deploy/systemd/` (instructions in the unit file).
+5. Import `deploy/grafana-dashboards/trackiwi.json` into Grafana. Pick your InfluxDB datasource and set the **bucket** variable.
+
+The dashboard is **Flux**, so it requires InfluxDB 2.x or InfluxDB Cloud, and
+Grafana 10 or later. The ingest itself also writes to InfluxDB 1.x (`version = 1`,
+`database = …`), but 1.x users need their own dashboard.
+
 ## Security
 
 > ⚠️ **The token is stored in plaintext — read this if the tracker is in a
