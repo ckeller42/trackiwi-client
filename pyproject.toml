@@ -117,6 +117,7 @@ module = [
     "test_client_sync",
     "test_export",
     "test_influx_config",
+    "test_influx_mirror",
     "test_influx_writer",
     "test_invariants",
     "test_lineprotocol",

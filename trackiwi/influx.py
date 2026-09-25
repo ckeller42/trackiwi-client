@@ -23,9 +23,11 @@ import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from . import TrackiwiError, __version__
+from .lineprotocol import format_point
+from .store import Store
 
 ENV_PREFIX = "TRACKIWI_INFLUX_"
 DEFAULT_TOKEN_ENV = "TRACKIWI_INFLUX_TOKEN"
@@ -338,3 +340,44 @@ class InfluxWriter:
         if self.config.database in names:
             return True, [*lines, f"database '{self.config.database}' found"]
         return False, [*lines, f"database '{self.config.database}' not found"]
+
+
+BATCH_SIZE = 5000
+
+
+class WriterProtocol(Protocol):
+    """Interface for a writer that mirror uses. Lets tests inject fake writers."""
+
+    def target_key(self) -> str:
+        """Stable identity of this target for mirror bookkeeping."""
+        ...
+
+    def write(self, lines: Sequence[str]) -> None:
+        """POST one gzipped batch of line protocol; raise on any non-2xx."""
+        ...
+
+
+def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -> int:
+    """Send every cached row not yet mirrored to the writer's target.
+
+    Implements :need:`REQ_MIRROR_RESUME`: the stored position advances only
+    after a batch is acknowledged, so it never moves past a row InfluxDB has
+    not accepted, and a failure leaves earlier batches recorded. Implements
+    :need:`REQ_MIRROR_IDEMPOTENT`: a row always becomes the same point (same
+    tags, same timestamp), which InfluxDB overwrites rather than duplicates,
+    so re-sending is always safe. Returns the number of points sent; the first
+    failed batch re-raises its `TrackiwiError`.
+    """
+    target = writer.target_key()
+    last = store.mirror_position(target)
+    names = store.tracker_names()
+    sent = 0
+    while True:
+        rows = store.rows_after(last, batch_size)
+        if not rows:
+            return sent
+        lines = [format_point(row, names.get(int(row["tracker_id"]))) for row in rows]
+        writer.write(lines)
+        last = int(rows[-1]["id"])
+        store.set_mirror_position(target, last)
+        sent += len(rows)

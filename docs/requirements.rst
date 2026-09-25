@@ -197,13 +197,13 @@ Export
 Mirror
 ------
 
-.. req:: Mirror is resumable
+.. req:: The mirror never advances past an unacknowledged row
    :id: REQ_MIRROR_RESUME
-   :tags: mirror, influx
+   :tags: integrity, influx
 
-   Mirror to InfluxDB is resumable: every row mirrored to a target is tracked by
-   id, so re-running continues from the highest id already acknowledged, losing
-   no data when the network or InfluxDB is unavailable. (Influx spec §5.1, §5.2.)
+   The per-target mirror position advances only after InfluxDB acknowledges a
+   batch. A failure leaves earlier batches recorded and the failed batch and
+   everything after it for the next run. (Influx spec §5.2.)
 
 .. req:: InfluxDB writes are bounded to one measurement and one target
    :id: REQ_INFLUX_WRITE_SCOPE
@@ -219,3 +219,11 @@ Mirror
 
    The InfluxDB token and password never appear in output: every message
    built from server-controlled text is redacted first. (Influx spec §5.6.)
+
+.. req:: Re-sending positions never creates duplicates
+   :id: REQ_MIRROR_IDEMPOTENT
+   :tags: integrity, influx
+
+   A cached row always becomes the same point — same measurement, tags and
+   timestamp — so re-sending (including a full backfill) overwrites rather
+   than duplicates. (Influx spec §4.)

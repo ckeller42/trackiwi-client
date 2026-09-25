@@ -163,7 +163,9 @@ Verifying tests
 
    ``tests/test_store_mirror.py::test_mirror_position_defaults_to_zero``,
    ``tests/test_store_mirror.py::test_mirror_position_is_per_target_and_persists``,
-   ``tests/test_store_mirror.py::test_existing_cache_gains_the_new_tables``
+   ``tests/test_store_mirror.py::test_existing_cache_gains_the_new_tables``,
+   ``tests/test_influx_mirror.py::test_failed_batch_does_not_advance_state``,
+   ``tests/test_influx_mirror.py::test_only_new_rows_are_sent_after_more_sync``
 
 .. test:: Only the write endpoint receives POSTs
    :id: TEST_INFLUX_WRITE_SCOPE
@@ -177,6 +179,12 @@ Verifying tests
    :verifies: REQ_INFLUX_TOKEN_REDACT
 
    ``tests/test_influx_writer.py::test_token_and_password_are_redacted_from_error_bodies``
+
+.. test:: Re-sending produces identical points
+   :id: TEST_MIRROR_IDEMPOTENT
+   :verifies: REQ_MIRROR_IDEMPOTENT
+
+   ``tests/test_influx_mirror.py::test_resending_produces_identical_lines``
 
 Requirement → test table
 ------------------------
