@@ -190,3 +190,14 @@ Export
    tags ``tracker_id`` and ``tracker_name`` and fields in natural units
    (distance in metres, voltage in volts). NULL optional columns are omitted,
    tag values are escaped, and non-finite values are rejected. (Influx spec §4.)
+
+Mirror
+------
+
+.. req:: Mirror is resumable
+   :id: REQ_MIRROR_RESUME
+   :tags: mirror, influx
+
+   Mirror to InfluxDB is resumable: every row mirrored to a target is tracked by
+   id, so re-running continues from the highest id already acknowledged, losing
+   no data when the network or InfluxDB is unavailable. (Influx spec §5.1, §5.2.)

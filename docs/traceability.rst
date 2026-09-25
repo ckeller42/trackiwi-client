@@ -156,6 +156,14 @@ Verifying tests
    ``tests/test_lineprotocol.py::test_null_optional_columns_are_omitted``,
    ``tests/test_lineprotocol.py::test_non_finite_value_is_rejected``
 
+.. test:: Mirror position is tracked per target and persists
+   :id: TEST_MIRROR_RESUME
+   :verifies: REQ_MIRROR_RESUME
+
+   ``tests/test_store_mirror.py::test_mirror_position_defaults_to_zero``,
+   ``tests/test_store_mirror.py::test_mirror_position_is_per_target_and_persists``,
+   ``tests/test_store_mirror.py::test_existing_cache_gains_the_new_tables``
+
 Requirement → test table
 ------------------------
 

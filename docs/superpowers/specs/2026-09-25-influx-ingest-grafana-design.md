@@ -160,6 +160,8 @@ last_id INTEGER NOT NULL`. `target` is a stable key derived from the config (URL
 + database/bucket), so pushing the same cache to two targets tracks them
 separately.
 
+The cache also gains a `tracker_names` table (`tracker_id INTEGER PRIMARY KEY, name TEXT NOT NULL`), refreshed by `ingest` from `trackers()`. `push` reads names from it rather than from the network. The tag value must be the same every time a row is sent, or re-sending would create a second series instead of overwriting the first, so the name has to be stored rather than fetched per push.
+
 ### 5.2 `influx push`
 
 1. Read cache rows with `id > last_id` for the target, ordered by `id`.
