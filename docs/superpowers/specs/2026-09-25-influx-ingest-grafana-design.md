@@ -325,7 +325,8 @@ compose stack and importable into any Grafana.
 - The bucket is a `bucket` dashboard variable (default `trackiwi`; buspi sets
   `buspi`). No query hardcodes a bucket name.
 - The tracker is selected with a `tracker` template variable
-  (`schema.tagValues(bucket: v.bucket, tag: "tracker_name", predicate: (r) => r._measurement == "trackiwi_position")`).
+  (`schema.tagValues(bucket: "${bucket}", tag: "tracker_name", predicate: (r) => r._measurement == "trackiwi_position", start: -365d)`).
+  Custom dashboard variables are interpolated as `${name}` in Flux; only Grafana's built-ins (`v.timeRangeStart`, `v.timeRangeStop`, `v.windowPeriod`) exist as `v.*`.
 - The file contains no real tracker ids, names, coordinates or hostnames.
 - All queries are **Flux**. This works on InfluxDB 2.x and InfluxDB Cloud, and
   matches the datasources buspi's local Grafana and Grafana Cloud already use,
@@ -359,8 +360,8 @@ All existing gates stay green: tests, coverage ≥ 95, mypy strict, interrogate
 | Config | File < environment precedence; `token_file` and `~` expansion; missing key names the key; mode `0600` self-heal |
 | Config (`token_env`) | Token read from the variable named by `token_env`; falls back to `token_file`; missing both → clear error naming both |
 | CLI | `influx check` output for OK, bucket not found, write-only token (403 → "auth OK, bucket not verifiable"), and auth failure; `ingest` runs `push` after a failed `sync` and exits 1 |
-| Dashboard JSON | Parses; three rows and the required panels present; every query is Flux and uses `v.bucket` (no literal bucket); no hardcoded datasource UID; no real values (uses the same shapes as the private-data guard) |
-| Deploy files | Compose and provisioning YAML parse; `.env.example` has placeholders for every variable the compose file references; systemd units contain no absolute user paths |
+| Dashboard JSON | Parses; three rows and the required panels present; every query is Flux and uses `"${bucket}"`; no hardcoded datasource UID; no real values (uses the same shapes as the private-data guard) |
+| Deploy files | Compose and provisioning YAML parse; `example.env` has placeholders for every variable the compose file references; systemd units contain no absolute user paths |
 
 New requirements, each traced to a verifying test in `docs/requirements.rst`:
 `REQ_INFLUX_WRITE_SCOPE`, `REQ_MIRROR_RESUME`, `REQ_MIRROR_IDEMPOTENT`,

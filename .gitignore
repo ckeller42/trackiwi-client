@@ -25,6 +25,7 @@ config.json
 *.json
 *.xml
 !tests/fixtures/synthetic-*
+!deploy/grafana-dashboards/*.json
 
 # --- Python ------------------------------------------------------------------
 __pycache__/

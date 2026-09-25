@@ -236,3 +236,12 @@ Mirror
    address, credential, tracker id or coordinate from any real deployment;
    values are placeholders, and every variable the compose file uses is
    defined in ``deploy/example.env``. (Influx spec §6.)
+
+.. req:: The dashboard is importable anywhere
+   :id: REQ_DASHBOARD_PORTABLE
+   :tags: portability, influx
+
+   The committed Grafana dashboard references its datasource only through a
+   ``DS_TRACKIWI`` variable, reads its bucket and tracker from dashboard
+   variables, uses Flux throughout, and contains no hardcoded datasource UID
+   or real value. (Influx spec §8.)

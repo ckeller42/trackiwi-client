@@ -1,0 +1,207 @@
+{
+  "uid": "trackiwi-overview",
+  "title": "trackiwi",
+  "description": "Position, travel and vehicle health from a trackiwi GPS tracker. Flux; InfluxDB 2.x / Cloud; Grafana 10+.",
+  "tags": ["trackiwi"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "time": { "from": "now-7d", "to": "now" },
+  "refresh": "5m",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_TRACKIWI",
+        "label": "InfluxDB (Flux)",
+        "type": "datasource",
+        "query": "influxdb",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "bucket",
+        "label": "Bucket",
+        "type": "textbox",
+        "query": "trackiwi",
+        "current": { "text": "trackiwi", "value": "trackiwi" },
+        "hide": 0
+      },
+      {
+        "name": "tracker",
+        "label": "Tracker",
+        "type": "query",
+        "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+        "query": "import \"influxdata/influxdb/schema\"\nschema.tagValues(bucket: \"${bucket}\", tag: \"tracker_name\", predicate: (r) => r._measurement == \"trackiwi_position\", start: -365d)",
+        "refresh": 1,
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    { "type": "row", "title": "Status", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+    {
+      "type": "stat", "title": "Last seen", "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "dateTimeFromNow" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "none" },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"lat\")\n  |> last()\n  |> map(fn: (r) => ({_time: r._time, _value: int(v: r._time) / 1000000}))"
+        }
+      ]
+    },
+    {
+      "type": "stat", "title": "Voltage now", "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "volt", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"voltage_v\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "type": "stat", "title": "Battery now", "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"battery_pct\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "type": "stat", "title": "Satellites now", "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"satellites\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "type": "stat", "title": "GNSS quality now", "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "none", "min": 0, "max": 5 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"gnss_quality\")\n  |> last()"
+        }
+      ]
+    },
+    {
+      "type": "geomap", "title": "Current position", "gridPos": { "h": 10, "w": 24, "x": 0, "y": 5 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "options": {
+        "view": { "id": "fit", "zoom": 13 },
+        "layers": [
+          { "type": "markers", "name": "Position", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" } }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: -365d)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and (r._field == \"lat\" or r._field == \"lon\"))\n  |> last()\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")"
+        }
+      ]
+    },
+    { "type": "row", "title": "Travel", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 }, "panels": [] },
+    {
+      "type": "geomap", "title": "Route", "gridPos": { "h": 12, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "options": {
+        "view": { "id": "fit" },
+        "layers": [
+          { "type": "route", "name": "Route", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" } }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and (r._field == \"lat\" or r._field == \"lon\"))\n  |> pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")\n  |> keep(columns: [\"_time\", \"lat\", \"lon\"])"
+        }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Speed", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 28 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "velocitykmh" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"speed_kmh\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Distance per day", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 28 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "lengthkm", "custom": { "drawStyle": "bars", "fillOpacity": 80 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"distance_m\")\n  |> aggregateWindow(every: 1d, fn: sum, createEmpty: false)\n  |> map(fn: (r) => ({r with _value: r._value / 1000.0}))"
+        }
+      ]
+    },
+    { "type": "row", "title": "Health", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 36 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Voltage", "gridPos": { "h": 8, "w": 12, "x": 0, "y": 37 },
+      "description": "Thresholds suit a 12 V lead-acid/AGM starter battery; adjust for your battery chemistry.",
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "custom": { "thresholdsStyle": { "mode": "line+area" } },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "yellow", "value": 12.0 },
+            { "color": "green", "value": 12.4 }
+          ] }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"voltage_v\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Battery", "gridPos": { "h": 8, "w": 12, "x": 12, "y": 37 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "percent", "min": 0, "max": 100 }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and r._field == \"battery_pct\")\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+        }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Satellites & GNSS quality", "gridPos": { "h": 8, "w": 24, "x": 0, "y": 45 },
+      "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+      "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A", "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
+          "query": "from(bucket: \"${bucket}\")\n  |> range(start: v.timeRangeStart, stop: v.timeRangeStop)\n  |> filter(fn: (r) => r._measurement == \"trackiwi_position\" and r.tracker_name == \"${tracker}\" and (r._field == \"satellites\" or r._field == \"gnss_quality\"))\n  |> aggregateWindow(every: v.windowPeriod, fn: mean, createEmpty: false)"
+        }
+      ]
+    }
+  ]
+}

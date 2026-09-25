@@ -113,6 +113,7 @@ module = [
     "test_cli",
     "test_cli_influx",
     "test_cli_reads",
+    "test_dashboard",
     "test_client_auth",
     "test_client_reads",
     "test_client_sync",

@@ -194,6 +194,14 @@ Verifying tests
    ``tests/test_deploy.py::test_example_env_values_are_placeholders``,
    ``tests/test_deploy.py::test_every_compose_variable_is_in_example_env``
 
+.. test:: Dashboard uses variables only and holds no real values
+   :id: TEST_DASHBOARD_PORTABLE
+   :verifies: REQ_DASHBOARD_PORTABLE
+
+   ``tests/test_dashboard.py::test_datasource_is_a_variable_everywhere``,
+   ``tests/test_dashboard.py::test_every_query_is_flux_on_the_bucket_variable``,
+   ``tests/test_dashboard.py::test_no_hardcoded_datasource_uids_or_real_values``
+
 Requirement → test table
 ------------------------
 
