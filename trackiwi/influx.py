@@ -187,6 +187,23 @@ def _header(headers: Mapping[str, str], name: str) -> str | None:
     return None
 
 
+def _read_error_body(error: urllib.error.HTTPError) -> bytes:
+    """Read an `HTTPError`'s body, tolerating a transport failure mid-read.
+
+    The status and headers are already known once urllib raises `HTTPError`;
+    letting a raw `TimeoutError`/`ConnectionResetError`/
+    `http.client.IncompleteRead` from `error.read()` escape would turn a
+    status callers already map (401/403 -> rejected token, 404 -> missing
+    bucket, 500 -> write failed) into an unmapped, unrecognisable error. An
+    empty body still lets callers map the status; it is only the detail text
+    that is lost.
+    """
+    try:
+        return error.read()
+    except (OSError, http.client.HTTPException):
+        return b""
+
+
 class InfluxWriter:
     """Talks to one InfluxDB target: detect the version, write, check.
 
@@ -252,7 +269,7 @@ class InfluxWriter:
             with self.opener(request, timeout=WRITE_TIMEOUT) as response:
                 result = response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
-            result = error.code, dict(error.headers or {}), error.read()
+            result = error.code, dict(error.headers or {}), _read_error_body(error)
         except urllib.error.URLError as error:
             raise TrackiwiError(
                 f"cannot reach InfluxDB at {self.config.url}: {error.reason}"

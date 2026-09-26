@@ -353,6 +353,41 @@ def test_transport_failures_become_trackiwierror_network_error(failure):
         Client(opener=FakeOpener(failure)).login("a@example.invalid", "pw")
 
 
+class _BrokenErrorBody(io.BytesIO):
+    """An `HTTPError.fp` whose `read()` fails, as a real socket can mid-transfer."""
+
+    def __init__(self, error):
+        super().__init__(b"")
+        self.error = error
+
+    def read(self, *args):
+        raise self.error
+
+
+def test_error_body_read_failure_keeps_the_status_401_becomes_autherror():
+    """`error.read()` inside `except HTTPError` used to run outside the `try`
+    that converts transport failures, so a timeout/reset while reading the
+    error *body* escaped as a bare exception and the already-known 401 —
+    which `_check` maps to `AuthError` — was lost with it."""
+    error = urllib.error.HTTPError(
+        f"{WEBSITE}/api/login",
+        401,
+        "error",
+        email.message.Message(),
+        _BrokenErrorBody(TimeoutError("timed out")),
+    )
+    with pytest.raises(AuthError):
+        Client(opener=FakeOpener(error)).login("a@example.invalid", "pw")
+
+
+def test_bare_timeout_error_names_the_exception_type_not_an_empty_message():
+    """A bare `TimeoutError()` (no message) is always truthy, so `f"...{error
+    or type(error).__name__}"` picked the (empty-string) error over the type
+    name, producing the empty message "network error: "."""
+    with pytest.raises(TrackiwiError, match="network error: TimeoutError"):
+        Client(opener=FakeOpener(TimeoutError())).login("a@example.invalid", "pw")
+
+
 def test_transport_failure_on_an_authed_call_is_redacted():
     """The token-scrubbing wrapper in `_api` still sees the converted error."""
     c = Client(

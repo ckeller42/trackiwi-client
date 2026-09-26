@@ -175,9 +175,13 @@ Verifying tests
    ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects``,
    ``tests/test_influx_writer.py::test_each_writer_gets_its_own_director``,
    ``tests/test_influx_writer.py::test_transport_failures_become_clear_errors``,
+   ``tests/test_influx_writer.py::test_error_body_read_failure_keeps_the_500_status_not_a_bare_timeouterror``,
+   ``tests/test_influx_writer.py::test_error_body_read_failure_on_401_still_reports_rejected_token``,
    ``tests/test_influx_writer.py::test_points_beyond_retention_are_acknowledged_with_a_warning``,
    ``tests/test_influx_writer.py::test_other_422_still_fails``,
    ``tests/test_client_auth.py::test_transport_failures_become_trackiwierror_network_error``,
+   ``tests/test_client_auth.py::test_error_body_read_failure_keeps_the_status_401_becomes_autherror``,
+   ``tests/test_client_auth.py::test_bare_timeout_error_names_the_exception_type_not_an_empty_message``,
    ``tests/test_cli_influx.py::test_ingest_sync_timeout_still_pushes``,
    ``tests/test_cli_influx.py::test_ingest_reports_a_name_refresh_failure_as_such``,
    ``tests/test_cli_influx.py::test_ingest_sync_and_push_both_failing_keeps_the_sync_exit_code``

@@ -368,6 +368,42 @@ def test_transport_failures_become_clear_errors(failure):
         InfluxWriter(_cfg(), opener=opener).write(["m f=1.0 1"])
 
 
+# --- A transport failure while reading an *error* body (review finding) -----
+#
+# `error.read()` inside `except urllib.error.HTTPError` used to run outside
+# any `try` that converts `OSError`/`http.client.HTTPException` to a
+# `TrackiwiError`, so a timeout or reset while reading a 500's or 401's body
+# escaped as a bare `TimeoutError`/`ConnectionResetError` — a raw traceback,
+# and the already-known HTTP status (which callers map to a specific message)
+# was lost with it.
+
+
+def _http_error_with_broken_body(status: int, error: Exception) -> urllib.error.HTTPError:
+    class _BrokenBody(io.BytesIO):
+        def read(self, *args: Any) -> bytes:
+            raise error
+
+    return urllib.error.HTTPError(
+        "http://influx.example.invalid:8086/api/v2/write",
+        status,
+        "error",
+        email.message.Message(),
+        _BrokenBody(b""),
+    )
+
+
+def test_error_body_read_failure_keeps_the_500_status_not_a_bare_timeouterror():
+    error = _http_error_with_broken_body(500, TimeoutError("timed out"))
+    with pytest.raises(TrackiwiError, match="write failed \\(HTTP 500\\)"):
+        InfluxWriter(_cfg(), opener=FakeOpener(error)).write(["m f=1.0 1"])
+
+
+def test_error_body_read_failure_on_401_still_reports_rejected_token():
+    error = _http_error_with_broken_body(401, ConnectionResetError(54, "reset"))
+    with pytest.raises(TrackiwiError, match="rejected the token or credentials \\(HTTP 401\\)"):
+        InfluxWriter(_cfg(), opener=FakeOpener(error)).write(["m f=1.0 1"])
+
+
 # --- Points beyond the retention policy (final review I3) -------------------
 
 _RETENTION_V2 = (

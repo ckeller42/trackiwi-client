@@ -227,6 +227,22 @@ def _header(headers: dict[str, str], name: str) -> str | None:
     return None
 
 
+def _read_error_body(error: urllib.error.HTTPError) -> bytes:
+    """Read an `HTTPError`'s body, tolerating a transport failure mid-read.
+
+    The status and headers are already known once urllib raises `HTTPError`;
+    letting a raw `TimeoutError`/`ConnectionResetError`/
+    `http.client.IncompleteRead` from `error.read()` escape would turn a
+    status `_check` already maps (401/412 -> `AuthError`) into an unmapped
+    error. An empty body still lets callers map the status; it is only the
+    detail text that is lost.
+    """
+    try:
+        return error.read()
+    except (OSError, http.client.HTTPException):
+        return b""
+
+
 #: Anything that looks like a bearer credential in server-controlled text.
 _BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 
@@ -478,7 +494,7 @@ class Client:
                 # official client executes. We deliberately ignore it.
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers), error.read()
+            return error.code, dict(error.headers), _read_error_body(error)
         except urllib.error.URLError as error:
             raise TrackiwiError(f"network error: {error.reason}") from error
         except (OSError, http.client.HTTPException) as error:
@@ -487,7 +503,7 @@ class Client:
             # RemoteDisconnected or IncompleteRead unwrapped. Converted here so
             # every caller (notably `ingest`, which must still push) sees a
             # `TrackiwiError` instead of a traceback.
-            raise TrackiwiError(f"network error: {error or type(error).__name__}") from error
+            raise TrackiwiError(f"network error: {str(error) or type(error).__name__}") from error
 
     def _api(
         self,
