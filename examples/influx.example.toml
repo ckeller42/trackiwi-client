@@ -1,0 +1,18 @@
+# Copy to ~/.config/trackiwi/influx.toml (mode 0600) and adjust.
+# Every key can be overridden by TRACKIWI_INFLUX_<KEY> in the environment.
+url = "http://localhost:8086"
+version = "auto"          # "auto" | 1 | 2
+
+# InfluxDB 2.x / Cloud
+org = "home"
+bucket = "trackiwi"
+# The token is never written here. Either name the environment variable
+# that holds it (default TRACKIWI_INFLUX_TOKEN) ...
+# token_env = "INFLUXDB_TOKEN"
+# ... or point at a file that contains only the token:
+# token_file = "~/.config/trackiwi/influx.token"
+
+# InfluxDB 1.x
+# database = "trackiwi"
+# username = "trackiwi"
+# password_file = "~/.config/trackiwi/influx.password"

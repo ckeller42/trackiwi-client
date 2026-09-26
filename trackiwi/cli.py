@@ -21,6 +21,7 @@ from typing import Any
 
 from .client import AuthError, Client, InsecureApiBaseError, TrackiwiError
 from .export import FORMATS
+from .influx import InfluxWriter, load_config, mirror
 from .store import Store, cache_files, default_db_path
 
 
@@ -303,15 +304,14 @@ READ_DESCRIPTIONS = {
 }
 
 
-def cmd_sync(args: argparse.Namespace) -> int:
+def _sync_into_cache(client: Client, full: bool) -> None:
     """Fetch new positions into the local cache, reporting progress."""
-    client = Client.load()
     if not client.authenticated:
         # Checked before Store() is ever opened: otherwise an unauthenticated
         # run leaves behind an empty cache directory and database file.
         raise AuthError("not logged in — run 'trackiwi login'")
     with Store() as store:
-        offset = None if args.full else store.max_id()
+        offset = None if full else store.max_id()
         # `fetched` drives the progress line, because that is what the server's
         # total is comparable with; `written` counts rows that were actually
         # new, which is what gets reported at the end.
@@ -330,6 +330,79 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if skipped_total:
             print(f"skipped {skipped_total} malformed rows", file=sys.stderr)
         print(f"{written} new positions, {store.count()} cached in total")
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    """Fetch new positions into the local cache, reporting progress."""
+    _sync_into_cache(Client.load(), full=args.full)
+    return 0
+
+
+def cmd_influx_check(_: argparse.Namespace) -> int:
+    """Probe the configured InfluxDB target and print a report. Writes nothing."""
+    ok, lines = InfluxWriter(load_config()).check()
+    for line in lines:
+        print(line)
+    return 0 if ok else 1
+
+
+def _push() -> int:
+    """Mirror new cached rows to InfluxDB and return how many were sent."""
+    writer = InfluxWriter(load_config())
+    if not default_db_path().exists():
+        # Never create the cache as a side effect: it is a movement history.
+        print("nothing cached yet — run 'trackiwi sync' first")
+        return 0
+    with Store() as store:
+        sent = mirror(store, writer)
+    print(f"pushed {sent} positions to InfluxDB")
+    return sent
+
+
+def cmd_influx_push(_: argparse.Namespace) -> int:
+    """Mirror cached positions not yet sent to the configured InfluxDB."""
+    _push()
+    return 0
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Sync from trackiwi, refresh tracker names, then push to InfluxDB.
+
+    The three steps fail independently. The push runs even when the sync or
+    the name refresh fails: the cache is the buffer, and whatever is already
+    in it should still reach InfluxDB. Each failure is reported on its own
+    ("sync failed" / "tracker names not refreshed"). The first trackiwi-side
+    error is re-raised afterwards so the exit code still reports it (2 for
+    auth, 1 else); when the push fails too, its error is printed and the
+    trackiwi-side error still decides the exit code.
+    """
+    trackiwi_error: TrackiwiError | None = None
+    client: Client | None = None
+    try:
+        client = Client.load()
+        _sync_into_cache(client, full=False)
+    except TrackiwiError as error:
+        trackiwi_error = error
+        print(f"sync failed: {error}", file=sys.stderr)
+    # Names are refreshed whether or not the sync got through: without them
+    # `mirror` refuses to push (it never writes an id as a placeholder name).
+    if client is not None and not isinstance(trackiwi_error, AuthError):
+        try:
+            trackers = client.trackers()
+            names = {int(t["id"]): str(t.get("name") or "") for t in trackers if "id" in t}
+            with Store() as store:
+                store.set_tracker_names({k: v for k, v in names.items() if v})
+        except TrackiwiError as error:
+            trackiwi_error = trackiwi_error or error
+            print(f"tracker names not refreshed: {error}", file=sys.stderr)
+    try:
+        _push()
+    except TrackiwiError as error:
+        if trackiwi_error is None:
+            raise
+        print(f"push failed: {error}", file=sys.stderr)
+    if trackiwi_error is not None:
+        raise trackiwi_error
     return 0
 
 
@@ -429,6 +502,19 @@ def build_parser() -> argparse.ArgumentParser:
     sync = sub.add_parser("sync", help="fetch new positions into the local cache")
     sync.add_argument("--full", action="store_true", help="restart from the beginning")
     sync.set_defaults(func=cmd_sync)
+
+    influx = sub.add_parser("influx", help="write cached positions to InfluxDB")
+    influx_sub = influx.add_subparsers(dest="influx_command", required=True)
+    influx_sub.add_parser(
+        "check", help="probe the configured InfluxDB target (read-only)"
+    ).set_defaults(func=cmd_influx_check)
+    influx_sub.add_parser("push", help="send cached positions not yet mirrored").set_defaults(
+        func=cmd_influx_push
+    )
+
+    sub.add_parser(
+        "ingest", help="sync from trackiwi, then push to InfluxDB (for timers)"
+    ).set_defaults(func=cmd_ingest)
 
     export = sub.add_parser("export", help="export cached positions")
     export.add_argument("--format", choices=sorted(FORMATS), required=True)

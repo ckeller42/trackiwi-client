@@ -23,9 +23,11 @@ Safety & privacy
    :id: REQ_READONLY
    :tags: safety
 
-   The only state-changing request the client may issue is
-   ``DELETE /api/v2/session`` (logout). No call may alter trackers, alarms,
-   tours, markers or shares. (Design spec §7.5.)
+   Against the **trackiwi API**, the only state-changing request the client
+   may issue is ``DELETE /api/v2/session`` (logout). No call may alter
+   trackers, alarms, tours, markers or shares. (Design spec §7.5; rescoped by
+   influx spec §3.2 — writes to the user's own InfluxDB are bounded
+   separately by REQ_INFLUX_WRITE_SCOPE.)
 
 .. req:: No private data in the repository
    :id: REQ_NO_PRIVATE_DATA
@@ -123,8 +125,9 @@ Local cache & config
    :id: REQ_CONFIG_MODE_0600
    :tags: security, storage
 
-   The credentials file is created at mode 0600 and a widened mode is narrowed
-   back on load. (Design spec §7.3.)
+   The credentials file and the InfluxDB target config (``influx.toml``) are
+   kept at mode 0600, and a widened mode is narrowed back on load.
+   (Design spec §7.3; influx spec §5.6.)
 
 .. req:: The position cache is 0600 in a 0700 directory
    :id: REQ_CACHE_MODE_0600
@@ -181,3 +184,64 @@ Export
    ``logout`` revokes the session server-side (``DELETE /api/v2/session``) and,
    when it cannot, still removes the local credentials and warns that the token
    may remain valid. (Design spec §7.3.)
+
+.. req:: Positions are written to InfluxDB in natural units
+   :id: REQ_LINEPROTOCOL_UNITS
+   :tags: influx, data
+
+   Each cached row becomes one ``trackiwi_position`` line-protocol point with
+   tags ``tracker_id`` and ``tracker_name`` and fields in natural units
+   (distance in metres, voltage in volts). NULL optional columns are omitted,
+   tag values are escaped, and non-finite values are rejected. (Influx spec §4.)
+
+Mirror
+------
+
+.. req:: The mirror never advances past an unacknowledged row
+   :id: REQ_MIRROR_RESUME
+   :tags: integrity, influx
+
+   The per-target mirror position advances only after InfluxDB acknowledges a
+   batch. A failure leaves earlier batches recorded and the failed batch and
+   everything after it for the next run. (Influx spec §5.2.)
+
+.. req:: InfluxDB writes are bounded to one measurement and one target
+   :id: REQ_INFLUX_WRITE_SCOPE
+   :tags: safety, influx
+
+   The only writes to InfluxDB are POSTs of ``trackiwi_position`` line
+   protocol to the configured target's write endpoint (``/api/v2/write`` or
+   ``/write``). No deletes, no schema or bucket management. (Influx spec §3.2.)
+
+.. req:: InfluxDB credentials are never shown
+   :id: REQ_INFLUX_TOKEN_REDACT
+   :tags: privacy, security, influx
+
+   The InfluxDB token and password never appear in output: every message
+   built from server-controlled text is redacted first. (Influx spec §5.6.)
+
+.. req:: Re-sending positions never creates duplicates
+   :id: REQ_MIRROR_IDEMPOTENT
+   :tags: integrity, influx
+
+   A cached row always becomes the same point — same measurement, tags and
+   timestamp — so re-sending (including a full backfill) overwrites rather
+   than duplicates. (Influx spec §4.)
+
+.. req:: Committed deployment templates carry no deployment's specifics
+   :id: REQ_PORTABLE_CONFIG
+   :tags: privacy, portability, influx
+
+   No file under ``deploy/`` or ``examples/`` contains a hostname, IP
+   address, credential, tracker id or coordinate from any real deployment;
+   values are placeholders, and every variable the compose file uses is
+   defined in ``deploy/example.env``. (Influx spec §6.)
+
+.. req:: The dashboard is importable anywhere
+   :id: REQ_DASHBOARD_PORTABLE
+   :tags: portability, influx
+
+   The committed Grafana dashboard references its datasource only through a
+   ``DS_TRACKIWI`` variable, reads its bucket and tracker from dashboard
+   variables, uses Flux throughout, and contains no hardcoded datasource UID
+   or real value. (Influx spec §8.)

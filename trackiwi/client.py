@@ -7,6 +7,7 @@ SQLite or output formats.
 from __future__ import annotations
 
 import contextlib
+import http.client
 import json
 import math
 import os
@@ -224,6 +225,22 @@ def _header(headers: dict[str, str], name: str) -> str | None:
         if key.lower() == lname:
             return value
     return None
+
+
+def _read_error_body(error: urllib.error.HTTPError) -> bytes:
+    """Read an `HTTPError`'s body, tolerating a transport failure mid-read.
+
+    The status and headers are already known once urllib raises `HTTPError`;
+    letting a raw `TimeoutError`/`ConnectionResetError`/
+    `http.client.IncompleteRead` from `error.read()` escape would turn a
+    status `_check` already maps (401/412 -> `AuthError`) into an unmapped
+    error. An empty body still lets callers map the status; it is only the
+    detail text that is lost.
+    """
+    try:
+        return error.read()
+    except (OSError, http.client.HTTPException):
+        return b""
 
 
 #: Anything that looks like a bearer credential in server-controlled text.
@@ -450,7 +467,9 @@ class Client:
         """Perform one HTTP request and return `(status, headers, body)`.
 
         Implements :need:`REQ_IGNORE_APP_COMMAND`: any `trackiwi-app-command`
-        response header is returned unread and never acted on.
+        response header is returned unread and never acted on. Every transport
+        failure, including a timeout or reset while reading the response,
+        becomes a `TrackiwiError` ("network error: …").
         """
         headers = {
             "Accept": "application/json",
@@ -475,9 +494,16 @@ class Client:
                 # official client executes. We deliberately ignore it.
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers), error.read()
+            return error.code, dict(error.headers), _read_error_body(error)
         except urllib.error.URLError as error:
             raise TrackiwiError(f"network error: {error.reason}") from error
+        except (OSError, http.client.HTTPException) as error:
+            # urllib wraps only the send in `URLError`; `getresponse()` and
+            # `read()` raise TimeoutError, ConnectionResetError,
+            # RemoteDisconnected or IncompleteRead unwrapped. Converted here so
+            # every caller (notably `ingest`, which must still push) sees a
+            # `TrackiwiError` instead of a traceback.
+            raise TrackiwiError(f"network error: {str(error) or type(error).__name__}") from error
 
     def _api(
         self,

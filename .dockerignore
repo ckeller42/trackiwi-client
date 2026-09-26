@@ -1,0 +1,35 @@
+# Defence in depth: the Dockerfile copies only pyproject.toml, LICENSE and
+# trackiwi/ (an allowlist), so nothing else can reach an image layer anyway.
+# These patterns keep private data out of the build context itself. A pattern
+# without **/ matches only at the context root, so every private .gitignore
+# pattern is mirrored here with a **/ prefix (tests/test_deploy.py checks it).
+.venv
+.git
+.pytest_cache
+.ruff_cache
+.mypy_cache
+docs/_build
+.superpowers
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+config.json
+.env
+deploy/.env
+
+# --- Private data, at any depth (mirrors .gitignore) -------------------------
+**/*.db
+**/*.db-journal
+**/*.sqlite
+**/*.sqlite3
+**/.trackiwi/
+**/config.json
+**/.env
+**/.env.*
+**/*.gpx
+**/*.geojson
+**/*.kml
+**/*.csv
+**/*.json
+**/*.xml

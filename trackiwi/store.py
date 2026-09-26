@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,14 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 CREATE INDEX IF NOT EXISTS idx_positions_tracker_time
   ON positions (tracker_id, fix_at);
+CREATE TABLE IF NOT EXISTS mirror_state (
+  target  TEXT PRIMARY KEY,
+  last_id INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS tracker_names (
+  tracker_id INTEGER PRIMARY KEY,
+  name       TEXT NOT NULL
+);
 """
 
 
@@ -201,6 +209,53 @@ class Store:
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         sql = f"SELECT * FROM positions{where} ORDER BY fix_at, id"
         return list(self.conn.execute(sql, params))
+
+    def mirror_position(self, target: str) -> int:
+        """Return the highest id already mirrored to `target`, or 0 if none.
+
+        Part of :need:`REQ_MIRROR_RESUME`: the mirror resumes from here.
+        """
+        row = self.conn.execute(
+            "SELECT last_id FROM mirror_state WHERE target = ?", (target,)
+        ).fetchone()
+        last: int = row[0] if row is not None else 0
+        return last
+
+    def set_mirror_position(self, target: str, last_id: int) -> None:
+        """Record that every row up to `last_id` reached `target`, and commit.
+
+        Committed immediately so that a later failure in the same run cannot
+        roll back progress that InfluxDB has already acknowledged.
+        """
+        self.conn.execute(
+            "INSERT OR REPLACE INTO mirror_state (target, last_id) VALUES (?, ?)",
+            (target, last_id),
+        )
+        self.conn.commit()
+
+    def rows_after(self, last_id: int, limit: int) -> list[sqlite3.Row]:
+        """Return up to `limit` rows with ``id > last_id``, ordered by id."""
+        return list(
+            self.conn.execute(
+                "SELECT * FROM positions WHERE id > ? ORDER BY id LIMIT ?",
+                (last_id, limit),
+            )
+        )
+
+    def set_tracker_names(self, names: Mapping[int, str]) -> None:
+        """Store the display name of each tracker id, replacing old names."""
+        self.conn.executemany(
+            "INSERT OR REPLACE INTO tracker_names (tracker_id, name) VALUES (?, ?)",
+            list(names.items()),
+        )
+        self.conn.commit()
+
+    def tracker_names(self) -> dict[int, str]:
+        """Return every stored tracker id → display name."""
+        return {
+            int(tracker_id): str(name)
+            for tracker_id, name in self.conn.execute("SELECT tracker_id, name FROM tracker_names")
+        }
 
     def purge(self) -> None:
         """Close and delete the cache, including SQLite's sidecar files.

@@ -39,6 +39,9 @@
 - `trackiwi/__init__.py`: shared contracts — `TrackiwiError`, `AuthError`, the
   `COLUMNS` tuple, `__version__`. `client.py` and `store.py` never import each
   other.
+- `trackiwi/lineprotocol.py` — pure: cached row → InfluxDB line protocol (natural units)
+- `trackiwi/influx.py` — InfluxDB target config, version detection, writes, `check`, and the resumable `mirror`
+- `deploy/` — Docker Compose stack, Grafana provisioning + portable Flux dashboard, systemd timer
 
 ## Read-only API surface covered
 

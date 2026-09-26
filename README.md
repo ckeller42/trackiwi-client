@@ -204,6 +204,67 @@ two consequences worth knowing:
   previous export untouched — where a plain `open(path, "w")` would have
   succeeded.
 
+## InfluxDB & Grafana
+
+`trackiwi ingest` syncs from trackiwi into the local cache, then mirrors every
+position not yet sent into InfluxDB (measurement `trackiwi_position`). The cache
+is the buffer: if InfluxDB or the network is down, positions wait in the cache
+and the next run catches up. Re-sending is harmless (same point, same
+timestamp), and the first run is the full backfill.
+
+```bash
+trackiwi influx check   # connectivity, version, auth — read-only
+trackiwi influx push    # send cached positions not yet mirrored
+trackiwi ingest         # sync + push; what the timer/container runs
+```
+
+### Option A — turnkey stack (Docker Compose)
+
+```bash
+cp deploy/example.env deploy/.env        # replace every "changeme" value
+docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+Grafana runs at <http://localhost:3000> with the **trackiwi** dashboard already
+provisioned. The ingest container runs every `TRACKIWI_INGEST_INTERVAL` seconds.
+
+### Option B — your own InfluxDB (systemd timer)
+
+1. Install with `pipx install .` (or `pip install --user .` where your system
+   allows it), so the command lands in `~/.local/bin/trackiwi`, which is where
+   the unit's `ExecStart` looks. If you installed it anywhere else (the `.venv`
+   from [Install](#install), say), edit `ExecStart` to that path.
+2. Copy `examples/influx.example.toml` to `~/.config/trackiwi/influx.toml` (mode 0600) and fill it in.
+3. Give the timer the token. A systemd user unit does **not** see variables
+   exported in your shell rc, so put the token in
+   `~/.config/trackiwi/influx.env` (mode 0600), which the unit reads if it
+   exists — or name a file with `token_file` in `influx.toml`. Never put the
+   token in `influx.toml` itself.
+
+   ```bash
+   # ~/.config/trackiwi/influx.env — one VAR=value per line, no `export`
+   TRACKIWI_INFLUX_TOKEN=changeme-influx-token
+   # the variable token_env names, if you changed it; for 1.x:
+   # TRACKIWI_INFLUX_PASSWORD=changeme-influx-password
+   ```
+
+4. Run `trackiwi ingest` once by hand while trackiwi is reachable: `influx push`
+   only sends positions whose tracker name is already known (it never writes
+   the tracker id as a stand-in name), and `ingest` is what stores the names.
+   `trackiwi influx check` verifies the InfluxDB side.
+5. Install the user timer from `deploy/systemd/` (instructions in the unit file).
+6. Import `deploy/grafana-dashboards/trackiwi.json` into Grafana. Pick your InfluxDB datasource and set the **bucket** variable.
+
+The mirror never follows an HTTP redirect: if `url` sits behind a proxy or login
+gate that answers with a 3xx, `push` stops with an error naming the redirect
+target, and you set `url` to the final address. Points older than the bucket's
+retention are dropped by InfluxDB; `push` prints a warning and moves on.
+
+The dashboard is **Flux**, so it requires InfluxDB 2.x or InfluxDB Cloud, and
+Grafana 10 or later. The ingest itself also writes to InfluxDB 1.x (`version = 1`,
+`database = …`), but 1.x users need their own dashboard.
+
 ## Security
 
 > ⚠️ **The token is stored in plaintext — read this if the tracker is in a

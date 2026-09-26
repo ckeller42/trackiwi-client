@@ -1,10 +1,11 @@
 """Read-only client for a personal trackiwi GPS account.
 
 Implements :need:`REQ_ZERO_DEPS` (standard library only, no runtime
-dependencies), :need:`REQ_READONLY` (the only state-changing request is
-``DELETE /api/v2/session``) and :need:`REQ_NO_PRIVATE_DATA` (no private data is
-ever committed). Requirements live as ``sphinx-needs`` objects under ``docs/``;
-see ``docs/requirements.rst``.
+dependencies), :need:`REQ_READONLY` (against the trackiwi API the only
+state-changing request is ``DELETE /api/v2/session``; InfluxDB writes are
+bounded by :need:`REQ_INFLUX_WRITE_SCOPE`) and :need:`REQ_NO_PRIVATE_DATA`
+(no private data is ever committed). Requirements live as ``sphinx-needs``
+objects under ``docs/``; see ``docs/requirements.rst``.
 """
 
 __version__ = "0.1.0"
