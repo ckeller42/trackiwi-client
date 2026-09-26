@@ -43,6 +43,12 @@ jobs:
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # The code-review plugin declares these tools in its own frontmatter
+          # (read-only gh commands + posting comments); it also launches
+          # sub-agents (Task) and reads CLAUDE.md (Read/Glob/Grep). Allowing only
+          # the inline-comment tool made every read fail (21 permission denials,
+          # nothing posted). Nothing here can push code: `contents: read` above.
+          claude_args: >-
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Task,Read,Glob,Grep"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
