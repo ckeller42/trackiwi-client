@@ -325,8 +325,11 @@ tooling), then run the gate:
 ```
 
 No private data may enter this repository. A pre-commit hook blocks databases,
-track exports outside `tests/fixtures/synthetic-*`, credential files and
-token-shaped strings; `.gitignore` and CI enforce the same rules independently.
+track exports outside `tests/fixtures/synthetic-*`, credential files
+(`config.json`, `.env*`, `influx.toml`, `*.token`, `*.password` and their
+bare-dotfile forms — the committed templates are `influx.example.toml` and
+`example.env`) and token-shaped strings; `.gitignore` and CI enforce the same
+rules independently.
 Test fixtures are synthetic: invented coordinates, invented IDs.
 
 ### Requirements & traceability

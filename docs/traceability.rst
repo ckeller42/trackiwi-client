@@ -28,7 +28,9 @@ Verifying tests
    :verifies: REQ_NO_PRIVATE_DATA
 
    ``tests/test_check_no_private_data.py::test_database_is_blocked``,
-   ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``
+   ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``,
+   ``tests/test_check_no_private_data.py::test_influx_credential_files_are_blocked``,
+   ``tests/test_check_no_private_data.py::test_influx_templates_stay_committable``
 
 .. test:: A token echoed in an error body is redacted
    :id: TEST_TOKEN_NEVER_LOGGED

@@ -27,6 +27,11 @@ deploy/.env
 **/config.json
 **/.env
 **/.env.*
+**/influx.toml
+**/*.token
+**/.token
+**/*.password
+**/.password
 **/*.gpx
 **/*.geojson
 **/*.kml
