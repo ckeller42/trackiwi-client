@@ -52,3 +52,31 @@ jobs:
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Agent,Task,Read,Glob,Grep"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
+          # TEMPORARY (#8): show the transcript so the denied tool call is visible.
+          show_full_output: true
+          # TEMPORARY (#8): the action's OIDC token exchange refuses a workflow
+          # file that differs from main, so a PR editing this file never runs it.
+          # A supplied token skips that exchange; comments then come from
+          # github-actions[bot]. Removed before merge.
+          github_token: ${{ github.token }}
+
+      # A denied tool call ends the review early with nothing posted, and the
+      # action still reports success (#8). Read the denials from the action's
+      # execution file and fail the job if there were any.
+      - name: Fail on permission denials
+        if: ${{ !cancelled() }}
+        env:
+          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
+        run: |
+          if [ -z "$EXECUTION_FILE" ] || [ ! -f "$EXECUTION_FILE" ]; then
+            echo "::error::Claude did not run (no execution file). A workflow file that differs from main makes the action skip itself; the PR was not reviewed."
+            exit 1
+          fi
+          denials=$(jq -c '[.[] | select(.type == "result") | .permission_denials[]?]' "$EXECUTION_FILE")
+          count=$(jq 'length' <<<"$denials")
+          if [ "$count" -gt 0 ]; then
+            echo "::error::$count tool call(s) were denied; the review stopped early. Denied calls:"
+            jq -r '.[] | "  \(.tool_name): \(.tool_input | tojson | .[0:300])"' <<<"$denials"
+            exit 1
+          fi
+          echo "permission denials: 0"
