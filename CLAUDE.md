@@ -89,6 +89,16 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   security scanners will flag `xml.etree` anyway; that flag is a false
   positive in this codebase and should not be "fixed" by adding the
   dependency.
+- **`heading.py` is pure and offline.** It imports only the stdlib and
+  `export` (for `Row` and `_by_tracker`); it never touches `client`, `store`
+  or the network, and `cmd_heading` never creates the cache. Parked heading =
+  initial bearing between the *last two moving fixes of the same tracker*,
+  never the raw `course` at zero speed (it drifts) and never a fix from
+  another device. `DEFAULT_STALE_AFTER` (3600 s) is a judgement, not a
+  constant of nature, so it stays a parameter (`stale_after`,
+  `--stale-after`). The two caveats (reversing cannot be detected; GPS alone
+  cannot sense a stationary heading) live in the module docstring and the
+  `--help` text; a test pins the latter.
 - **`influx.py` is the only module that talks to InfluxDB**, `lineprotocol.py`
   is pure. `influx.py` and `client.py` never import each other.
 - **Read-only means read-only against trackiwi.** InfluxDB writes are allowed
@@ -145,8 +155,8 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   `sphinx-needs==8.5.0`. Build locally:
   `.venv/bin/sphinx-build -b html -W docs docs/_build/html` (output is
   gitignored; only Pages *hosting* is deferred until public).
-- **Doctests run on the pure functions only** (`export.*`, `normalize_epoch`,
-  `epoch_from_iso`, `parse_positions`), via `pytest --doctest-modules trackiwi`
+- **Doctests run on the pure functions only** (`export.*`, `heading.*`,
+  `normalize_epoch`, `epoch_from_iso`, `parse_positions`), via `pytest --doctest-modules trackiwi`
   in `ci.sh`. Never add a doctest to network/filesystem/non-deterministic code,
   and use synthetic values only.
 - **Docstring coverage** is gated by `interrogate` (`[tool.interrogate]` in

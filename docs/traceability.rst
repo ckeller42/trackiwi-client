@@ -160,6 +160,32 @@ Verifying tests
    ``tests/test_lineprotocol.py::test_null_optional_columns_are_omitted``,
    ``tests/test_lineprotocol.py::test_non_finite_value_is_rejected``
 
+.. test:: Heading arithmetic and fallbacks, offline
+   :id: TEST_HEADING_ESTIMATE
+   :verifies: REQ_HEADING_ESTIMATE
+
+   ``tests/test_heading.py::test_initial_bearing_cardinal_directions``,
+   ``tests/test_heading.py::test_initial_bearing_is_normalised_to_a_half_open_interval``,
+   ``tests/test_heading.py::test_initial_bearing_across_the_antimeridian``,
+   ``tests/test_heading.py::test_moving_uses_the_current_course``,
+   ``tests/test_heading.py::test_parked_after_driving_uses_the_bearing_of_the_last_two_moving_fixes``,
+   ``tests/test_heading.py::test_no_moving_fix_at_all_is_unknown_not_an_error``,
+   ``tests/test_heading.py::test_a_single_moving_fix_falls_back_to_its_course``,
+   ``tests/test_heading.py::test_two_moving_fixes_at_the_same_spot_fall_back_to_course``,
+   ``tests/test_heading.py::test_a_non_finite_cached_coordinate_falls_back_to_course_instead_of_raising``,
+   ``tests/test_heading.py::test_a_missing_speed_or_course_never_crashes``,
+   ``tests/test_heading.py::test_headings_are_estimated_per_tracker``,
+   ``tests/test_heading.py::test_cli_without_a_cache_does_not_create_one``,
+   ``tests/test_heading.py::test_cli_help_states_the_caveats``
+
+.. test:: The state flag follows the configurable threshold
+   :id: TEST_HEADING_STATE
+   :verifies: REQ_HEADING_STATE
+
+   ``tests/test_heading.py::test_freshly_parked_versus_stale_is_decided_by_the_threshold``,
+   ``tests/test_heading.py::test_the_stale_threshold_defaults_to_the_documented_constant``,
+   ``tests/test_heading.py::test_cli_stale_after_flag_is_honoured``
+
 .. test:: Mirror position is tracked per target and persists
    :id: TEST_MIRROR_RESUME
    :verifies: REQ_MIRROR_RESUME
