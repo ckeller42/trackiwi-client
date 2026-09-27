@@ -273,28 +273,56 @@ trackiwi ingest         # sync + push; what the timer/container runs
    `GET /api/v2/buckets`, which lists only the buckets the token may read, so
    with a write-only token it reports the bucket as not found and exits 1.
    The container's `influx` CLI was signed in as the operator by the setup
-   step (if it answers "unauthorized", add `--token <your INFLUXDB_TOKEN>`).
-   `home` and `trackiwi` are the org and bucket names from `deploy/.env`:
+   step. `home` and `trackiwi` are the org and bucket names from
+   `deploy/.env`. The helper is a shell function rather than a variable so
+   the snippet works in zsh (the macOS default) as well as bash:
 
    ```bash
-   C="docker compose -f deploy/docker-compose.yml exec influxdb"
-   BUCKET_ID=$($C influx bucket list --name trackiwi --hide-headers | awk '{print $1}')
-   $C influx auth create --org home --description "trackiwi ingest" \
+   stack_exec() { docker compose -f deploy/docker-compose.yml exec influxdb "$@"; }
+   BUCKET_ID=$(stack_exec influx bucket list --name trackiwi --hide-headers | awk '{print $1}')
+   stack_exec influx auth create --org home --description "trackiwi ingest" \
        --write-bucket "$BUCKET_ID" --read-bucket "$BUCKET_ID"
    ```
+
+   The `Permissions` column of the output must show exactly one `read:` and
+   one `write:` entry, both ending in the bucket id.
 
    Put the printed token into `deploy/.env` as `INFLUXDB_INGEST_TOKEN`. The
    ingest container never sees the operator token; only Grafana's provisioned
    datasource still uses it.
 
-3. Log in to trackiwi (the session lives on the `trackiwi-state` volume), start
-   the rest of the stack, and verify the InfluxDB side once:
+3. Give the ingest container a trackiwi session. It lives on the
+   `trackiwi-state` volume, so this is done once. Either log in inside the
+   container:
 
    ```bash
    docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
+   ```
+
+   or, if this machine is already logged in (`trackiwi trackers` works), copy
+   that session into the volume instead of entering the password again:
+
+   ```bash
+   docker compose -f deploy/docker-compose.yml run --rm -T ingest \
+       sh -c 'umask 077; mkdir -p ~/.config/trackiwi; cat > ~/.config/trackiwi/config.json' \
+       < ~/.config/trackiwi/config.json
+   ```
+
+   Both sessions then share one token: `trackiwi logout` on either side revokes
+   it for both.
+
+4. Start the rest of the stack and verify the InfluxDB side once:
+
+   ```bash
    docker compose -f deploy/docker-compose.yml up -d
    docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi influx check
    ```
+
+   The first ingest run backfills the whole history; `docker compose -f
+   deploy/docker-compose.yml logs ingest` ends with `pushed N positions to
+   InfluxDB`. A Flux `count()` over the bucket may come out slightly below the
+   cache's row count: the tracker occasionally reports two fixes with the same
+   timestamp, and InfluxDB keeps one point per tracker and timestamp.
 
 Grafana runs at <http://localhost:3000> with the **trackiwi** dashboard already
 provisioned. The ingest container runs every `TRACKIWI_INGEST_INTERVAL` seconds.
