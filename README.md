@@ -222,14 +222,71 @@ trackiwi ingest         # sync + push; what the timer/container runs
 
 ### Option A — turnkey stack (Docker Compose)
 
-```bash
-cp deploy/example.env deploy/.env        # replace every "changeme" value
-docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
-docker compose -f deploy/docker-compose.yml up -d
-```
+1. Copy the template and replace every `changeme` value, then start InfluxDB
+   alone so it runs its first-time setup (org, bucket, operator token):
+
+   ```bash
+   cp deploy/example.env deploy/.env
+   docker compose -f deploy/docker-compose.yml up -d influxdb
+   ```
+
+2. Create the token the ingest container uses. It is **not** the operator
+   token (`INFLUXDB_TOKEN`), which can read and delete every bucket; it is
+   scoped to the trackiwi bucket: **write** for `push`, plus **read** so that
+   `trackiwi influx check` can confirm the bucket exists — `check` asks
+   `GET /api/v2/buckets`, which lists only the buckets the token may read, so
+   with a write-only token it reports the bucket as not found and exits 1.
+   The container's `influx` CLI was signed in as the operator by the setup
+   step (if it answers "unauthorized", add `--token <your INFLUXDB_TOKEN>`).
+   `home` and `trackiwi` are the org and bucket names from `deploy/.env`:
+
+   ```bash
+   C="docker compose -f deploy/docker-compose.yml exec influxdb"
+   BUCKET_ID=$($C influx bucket list --name trackiwi --hide-headers | awk '{print $1}')
+   $C influx auth create --org home --description "trackiwi ingest" \
+       --write-bucket "$BUCKET_ID" --read-bucket "$BUCKET_ID"
+   ```
+
+   Put the printed token into `deploy/.env` as `INFLUXDB_INGEST_TOKEN`. The
+   ingest container never sees the operator token; only Grafana's provisioned
+   datasource still uses it.
+
+3. Log in to trackiwi (the session lives on the `trackiwi-state` volume), start
+   the rest of the stack, and verify the InfluxDB side once:
+
+   ```bash
+   docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
+   docker compose -f deploy/docker-compose.yml up -d
+   docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi influx check
+   ```
 
 Grafana runs at <http://localhost:3000> with the **trackiwi** dashboard already
 provisioned. The ingest container runs every `TRACKIWI_INGEST_INTERVAL` seconds.
+
+#### Exposing the stack to the LAN
+
+The published ports bind to `127.0.0.1`: InfluxDB (8086) and Grafana (3000)
+answer only on the machine running the stack, and the ingest container reaches
+InfluxDB over the compose network, not through a published port. To open
+Grafana to other devices on your LAN, set its bind address in `deploy/.env`
+and recreate the stack:
+
+```bash
+# deploy/.env — 0.0.0.0 is every interface; the address of one interface
+# limits it to that network
+GRAFANA_BIND_ADDRESS=0.0.0.0
+```
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+`INFLUXDB_BIND_ADDRESS` does the same for InfluxDB, which is only needed when
+something *outside* the stack writes to or queries it. Both services speak
+plain HTTP: expose them on a network you trust, and put a TLS reverse proxy in
+front for anything beyond that. Behind those ports is the vehicle's complete
+movement history, guarded by nothing more than Grafana's admin password and
+the InfluxDB tokens.
 
 ### Option B — your own InfluxDB (systemd timer)
 
@@ -335,8 +392,11 @@ tooling), then run the gate:
 ```
 
 No private data may enter this repository. A pre-commit hook blocks databases,
-track exports outside `tests/fixtures/synthetic-*`, credential files and
-token-shaped strings; `.gitignore` and CI enforce the same rules independently.
+track exports outside `tests/fixtures/synthetic-*`, credential files
+(`config.json`, `.env*`, `influx.toml`, `*.token`, `*.password` and their
+bare-dotfile forms — the committed templates are `influx.example.toml` and
+`example.env`) and token-shaped strings; `.gitignore` and CI enforce the same
+rules independently.
 Test fixtures are synthetic: invented coordinates, invented IDs.
 
 ### Requirements & traceability

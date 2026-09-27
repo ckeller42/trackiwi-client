@@ -134,6 +134,43 @@ def test_credential_file_is_blocked(tmp_path, monkeypatch):
     assert check_paths([rel]) != []
 
 
+# --- InfluxDB secrets: influx.toml and the token/password files it points at ---
+#
+# `influx.toml` names the target and the *paths* of its credential files
+# (`token_file`, `password_file`); the natural names for those files are
+# `influx.token` / `influx.password`, or the bare dotfiles `.token` /
+# `.password`. None of these used to be caught by name, only by the secret
+# scan — which a short token, or a `.toml` that merely points at the file,
+# slips past. The committed templates are `influx.example.toml` and
+# `example.env`, which no rule here matches.
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "influx.toml",
+        "deploy/influx.toml",
+        "influx.token",
+        "secrets/grafana.token",
+        ".token",
+        "influx.password",
+        ".password",
+        "deploy/.password",
+    ],
+)
+def test_influx_credential_files_are_blocked(tmp_path, monkeypatch, rel):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, rel, "short\n")
+    assert any("credential" in p for p in check_paths([rel]))
+
+
+@pytest.mark.parametrize("rel", ["examples/influx.example.toml", "deploy/example.env"])
+def test_influx_templates_stay_committable(tmp_path, monkeypatch, rel):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, rel, 'url = "http://localhost:8086"\n')
+    assert check_paths([rel]) == []
+
+
 def test_token_shaped_string_is_blocked(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     secret = "a" * 44

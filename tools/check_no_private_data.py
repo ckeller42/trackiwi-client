@@ -16,7 +16,13 @@ from pathlib import Path
 
 DENY_SUFFIXES = {".db", ".db-journal", ".sqlite", ".sqlite3"}
 TRACK_SUFFIXES = {".gpx", ".geojson", ".kml", ".csv", ".xml"}
-DENY_NAMES = {"config.json", ".env"}
+# Credential files by exact name. `influx.toml` holds the InfluxDB target and
+# the *paths* of its token/password files; `.token`/`.password` are those files
+# in bare dotfile form. Their committed templates are `influx.example.toml` and
+# `example.env`, which none of these match.
+DENY_NAMES = {"config.json", ".env", "influx.toml", ".token", ".password"}
+# Credential files by extension, at any depth: `influx.token`, `grafana.password`.
+CREDENTIAL_SUFFIXES = {".token", ".password"}
 ALLOWED_TRACK_DIR = "tests/fixtures"
 ALLOWED_TRACK_BASENAME_PREFIX = "synthetic-"
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".toml", ".yaml", ".yml", ".json", ".cfg", ".ini", ".sh"}
@@ -93,7 +99,7 @@ def check_paths(paths: Iterable[str]) -> list[str]:
                 f"with a '{ALLOWED_TRACK_BASENAME_PREFIX}' basename"
             )
             continue
-        if name in DENY_NAMES or name.startswith(".env."):
+        if name in DENY_NAMES or name.startswith(".env.") or suffix in CREDENTIAL_SUFFIXES:
             problems.append(f"{path}: credential file")
             continue
         if ".trackiwi/" in path:

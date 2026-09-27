@@ -9,6 +9,16 @@
 config.json
 .env
 .env.*
+# InfluxDB side: the target config and the token/password files it may point
+# at (examples/influx.example.toml documents them). The committed templates
+# are named *.example.toml and example.env precisely so no pattern here
+# matches them. `*.token`/`*.password` catch any name, `.token`/`.password`
+# the bare dotfile form.
+influx.toml
+*.token
+.token
+*.password
+.password
 
 # Exported tracks (real coordinates). Synthetic test data lives in
 # tests/fixtures/synthetic-* and is the ONLY location allowed to hold these.

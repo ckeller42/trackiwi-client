@@ -28,7 +28,9 @@ Verifying tests
    :verifies: REQ_NO_PRIVATE_DATA
 
    ``tests/test_check_no_private_data.py::test_database_is_blocked``,
-   ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``
+   ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``,
+   ``tests/test_check_no_private_data.py::test_influx_credential_files_are_blocked``,
+   ``tests/test_check_no_private_data.py::test_influx_templates_stay_committable``
 
 .. test:: A token echoed in an error body is redacted
    :id: TEST_TOKEN_NEVER_LOGGED
@@ -224,6 +226,15 @@ Verifying tests
    ``tests/test_deploy.py::test_dockerignore_mirrors_every_private_gitignore_pattern_at_any_depth``,
    ``tests/test_deploy.py::test_dockerfile_copies_only_what_the_build_needs``,
    ``tests/test_deploy.py::test_systemd_service_reads_the_optional_influx_env_file``
+
+.. test:: Compose binds to loopback and the ingest token is bucket-scoped
+   :id: TEST_DEPLOY_LEAST_EXPOSURE
+   :verifies: REQ_DEPLOY_LEAST_EXPOSURE
+
+   ``tests/test_deploy.py::test_published_ports_bind_to_loopback_by_default``,
+   ``tests/test_deploy.py::test_lan_exposure_is_opt_in_and_documented``,
+   ``tests/test_deploy.py::test_ingest_never_receives_the_admin_token``,
+   ``tests/test_deploy.py::test_documented_ingest_token_scope_is_read_and_write_on_the_bucket``
 
 .. test:: Dashboard uses variables only and holds no real values
    :id: TEST_DASHBOARD_PORTABLE

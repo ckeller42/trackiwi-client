@@ -288,13 +288,23 @@ test enforces this for the committed example and template files.
   environment rather than committed, and one dashboard provider that loads the
   committed dashboard.
 - **`ingest`**: a Python slim image that installs this repository and runs
-  `trackiwi ingest` every `TRACKIWI_INGEST_INTERVAL` seconds (default 600). The
+  `trackiwi ingest` every `TRACKIWI_INGEST_INTERVAL` seconds (default 600). It
+  receives `INFLUXDB_INGEST_TOKEN`, a token scoped to the trackiwi bucket
+  (`influx auth create --write-bucket <id> --read-bucket <id>`), never the
+  operator token: write is what `push` needs and read is what `influx check`
+  needs, because `GET /api/v2/buckets` lists only the buckets a token may
+  read (`REQ_DEPLOY_LEAST_EXPOSURE`). The
   Dockerfile copies only what the build needs (`pyproject.toml`, `LICENSE`,
   `trackiwi/`), because a `COPY` layer keeps whatever it copies; `.dockerignore`
   also mirrors every private `.gitignore` pattern with a `**/` prefix. The
   trackiwi session is created with `trackiwi login --token -` from environment
   variables, or read from a mounted config volume. The cache lives on a named
   volume, so the buffer survives container restarts.
+
+Every published port binds to `127.0.0.1` unless `INFLUXDB_BIND_ADDRESS` /
+`GRAFANA_BIND_ADDRESS` is set in `.env`; the ingest talks to InfluxDB over the
+compose network. Exposing a service to the LAN is a deliberate, documented
+step, not the default (`REQ_DEPLOY_LEAST_EXPOSURE`; the README has the recipe).
 
 ### 7.2 Systemd timer (bring your own InfluxDB)
 
