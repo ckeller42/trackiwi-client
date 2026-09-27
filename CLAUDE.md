@@ -12,9 +12,12 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - **No private data in this repo, ever.** Fixtures are synthetic. There is no
   record-from-live mode, deliberately.
 - **Never log or print the token.** Server-controlled text that can reach
-  output goes through `client._redact` first. The only such string is the error
-  body `_check` interpolates into its message, and a proxy or gateway can echo
-  the request's own `Authorization` header into that body.
+  output goes through `client._redact` first, at two points. `_check` redacts
+  the error body it interpolates into its message, because a proxy or gateway
+  can echo the request's own `Authorization` header into that body. And
+  `Client._api` scrubs the session token from the message of *every*
+  `TrackiwiError` raised beneath it — transport failures included — before it
+  propagates (belt and braces, whatever produced the message).
 - **Never hardcode the API base** — it comes from the login response's `server`
   — and **require `https://`** (`client._require_https`), wherever it came
   from: login response, `--api-base`, or the config file.
@@ -125,9 +128,10 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   apply the moment the repo goes public or the plan changes.
 - Do not self-merge past unresolved CodeRabbit threads.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
-- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files`, `pytest`
-  with coverage, the pure-function doctests, the `sphinx-build -W`
-  traceability build and `interrogate`, mirroring CI exactly.
+- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files`, strict
+  `mypy` (config in `[tool.mypy]`), `pytest` with coverage, the pure-function
+  doctests, the `sphinx-build -W` traceability build and `interrogate`,
+  mirroring CI exactly.
 - **Requirements live as `sphinx-needs` objects in `docs/`.** Each requirement
   is a `.. req::` with a stable `REQ_*` id in `docs/requirements.rst`; the
   implementing function's docstring references it the sphinx way

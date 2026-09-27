@@ -386,8 +386,10 @@ New requirements, each traced to a verifying test in `docs/requirements.rst`:
 `REQ_CONFIG_MODE_0600` is extended to cover `influx.toml`.
 
 No test contacts a real InfluxDB or Grafana, and none runs Docker. An optional
-end-to-end check against the compose stack is documented in the README and
-never runs in CI.
+end-to-end check against the compose stack was planned for the README and
+would never run in CI. (Note, 2026-09-27: it was not written; the README's
+"Option A" section covers bringing the stack up, but no separate end-to-end
+check procedure is documented.)
 
 ## 10. Documentation
 

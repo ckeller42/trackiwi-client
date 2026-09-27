@@ -9,9 +9,12 @@
 
 ## Overview
 
-- Read-only by construction: the only state-changing request is
-  `DELETE /api/v2/session` (`logout`). No writes to tours, markers, alarms or
-  shares are implemented, ever.
+- Read-only by construction against trackiwi: the only state-changing trackiwi
+  request is `DELETE /api/v2/session` (`logout`). No writes to tours, markers,
+  alarms or shares are implemented, ever.
+- Optional InfluxDB mirror (`trackiwi influx check|push`, `trackiwi ingest`):
+  its only writes are `trackiwi_position` line protocol to the one configured
+  InfluxDB target — no deletes, bucket management or other measurements.
 - Runs installed (`trackiwi …`) or straight from a clone (`python -m trackiwi …`),
   since there are no dependencies to resolve.
 
@@ -21,6 +24,9 @@
 - [Design spec](docs/superpowers/specs/2026-09-17-trackiwi-client-design.md): the
   reverse-engineered API reference, architecture, cache schema, error handling,
   and open questions.
+- [InfluxDB & Grafana spec](docs/superpowers/specs/2026-09-25-influx-ingest-grafana-design.md):
+  the mirror into InfluxDB, the `influx`/`ingest` commands, and the Grafana
+  dashboard and deploy stack.
 - [CLAUDE.md](CLAUDE.md): contributor rules, invariants verified against the live
   API, and repo/CI setup.
 - [SECURITY.md](SECURITY.md): what is sensitive and how to report a concern.
@@ -35,13 +41,17 @@
 - `trackiwi/client.py`: network I/O only (auth, sync, the read-only list reads).
 - `trackiwi/store.py`: SQLite cache only.
 - `trackiwi/export.py`: pure functions producing GPX / GeoJSON / CSV.
-- `trackiwi/cli.py`: command wiring and all user interaction.
+- `trackiwi/cli.py`: command wiring and all user interaction, including the
+  `influx check`, `influx push` and `ingest` (sync, then push) commands.
 - `trackiwi/__init__.py`: shared contracts — `TrackiwiError`, `AuthError`, the
   `COLUMNS` tuple, `__version__`. `client.py` and `store.py` never import each
   other.
-- `trackiwi/lineprotocol.py` — pure: cached row → InfluxDB line protocol (natural units)
-- `trackiwi/influx.py` — InfluxDB target config, version detection, writes, `check`, and the resumable `mirror`
-- `deploy/` — Docker Compose stack, Grafana provisioning + portable Flux dashboard, systemd timer
+- `trackiwi/lineprotocol.py`: pure — cached row → InfluxDB line protocol (natural units).
+- `trackiwi/influx.py`: the only module that talks to InfluxDB — target config,
+  version detection, writes, `check`, and the resumable `mirror`. It and
+  `client.py` never import each other.
+- `deploy/`: Docker Compose stack (the `ingest` container), Grafana provisioning
+  + portable Flux dashboard, systemd timer.
 
 ## Read-only API surface covered
 
@@ -50,6 +60,8 @@
 - `GET /api/v2/trackers` and the read-only lists `GET /api/v2/tours`,
   `/api/v2/markers`, `/api/v2/marker_categories`, `/api/v2/alarms`,
   `/api/v2/shares` (live reads, not cached).
+- InfluxDB (not trackiwi): `trackiwi_position` line-protocol writes to the one
+  configured target, plus the read-only probes `influx check` uses.
 
 ## Security posture
 

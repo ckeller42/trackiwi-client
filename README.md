@@ -43,8 +43,10 @@ yourself, `pipx install .` works too.
 
 ```bash
 trackiwi login                 # prompts for email and password
+trackiwi login --email you@example.com   # prompts for the password only
 trackiwi trackers               # list your devices
 trackiwi sync                   # fetch new positions (resumable)
+trackiwi sync --full            # restart from the beginning instead of resuming
 trackiwi export --format gpx --from 2026-09-16 --to 2026-09-25 -o route.gpx
 trackiwi logout                  # revokes the session server-side
 trackiwi purge --yes             # delete the local cache
@@ -268,6 +270,14 @@ Grafana 10 or later. The ingest itself also writes to InfluxDB 1.x (`version = 1
 The two map panels use the **OpenStreetMap** basemap (`osm-standard`), which needs no API
 key. Grafana's default basemap (CARTO) now shows "API KEY REQUIRED" tiles instead of a map.
 
+The **Route** panel downsamples rather than fetching every raw fix: it takes the
+last `lat` and `lon` in each `v.windowPeriod` window (`aggregateWindow(every:
+v.windowPeriod, fn: last)`) before pivoting them into points, so every plotted
+point is a real fix, and the panel sets `maxDataPoints` to 20000 so the window
+stays fine-grained over long time ranges. Without that, Grafana truncated the
+raw series and cut long routes short. Zoomed out far enough, a route is drawn
+from fewer fixes than the cache holds; narrow the time range to see them all.
+
 ## Security
 
 > ⚠️ **The token is stored in plaintext — read this if the tracker is in a
@@ -321,7 +331,7 @@ tooling), then run the gate:
 
 ```bash
 .venv/bin/pip install -e ".[dev]"
-./tools/ci.sh     # the same gates CI runs: pre-commit + pytest with coverage
+./tools/ci.sh     # the same gates CI runs: pre-commit, strict mypy, pytest with coverage, …
 ```
 
 No private data may enter this repository. A pre-commit hook blocks databases,
@@ -342,8 +352,9 @@ deferred until the repo is public. Build it locally with:
 ```
 
 `./tools/ci.sh` also runs this build, the pure-function doctests
-(`pytest --doctest-modules trackiwi`) and the `interrogate` docstring-coverage
-gate, alongside the test suite and coverage.
+(`pytest --doctest-modules trackiwi`), strict `mypy` over the package, tools
+and tests, and the `interrogate` docstring-coverage gate, alongside the test
+suite and coverage.
 
 ## License
 
