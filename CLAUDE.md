@@ -249,6 +249,35 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   out of merging entirely; and `bypass_actors: []`, which is the rulesets
   equivalent of `enforce_admins: true` — without it the owner can push straight
   past the rule, which defeats the point.
+- **The Claude review job (`claude-code-review.yml`) fails on a silent
+  non-review, by design.** Its last step reads the action's `execution_file`
+  and exits 1 when the result carries any `permission_denials` (printing the
+  denied tool and input; the sanitised log shows only a count), when Claude
+  produced no `result` message or a non-`success` one, or when Claude never
+  ran. Three things learned fixing #8 that the action does not tell you:
+  1. **A PR that edits that workflow is never reviewed by it.** The action's
+     OIDC token exchange refuses a workflow file that differs from `main`
+     ("Workflow validation failed … identical content to the version on the
+     repository's default branch") and the job used to pass anyway. Now the
+     gate step turns it red with a message naming this cause. To test a
+     workflow change on its own PR, pass `github_token: ${{ github.token }}`
+     temporarily (it skips the exchange; comments then come from
+     `github-actions[bot]`) and remove it before merge.
+  2. **The prompt is a slash command, so the CLI runs it through the `Skill`
+     tool**, which must be in `--allowedTools` as
+     `Skill(code-review:code-review *)`. This was the one denial left after
+     #6 and #7.
+  3. **Sub-agents must run in the foreground.** In a headless (SDK) session a
+     sub-agent runs in the background unless Claude asks otherwise, and
+     nothing ever wakes the session up again, so the review ended after six
+     turns with zero denials and nothing posted.
+     `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1` on the action step forces the
+     foreground. `gh run rerun --debug` does **not** reveal the transcript
+     (the action keys on the `ACTIONS_STEP_DEBUG` env var, which a debug
+     re-run does not set); `show_full_output: true` does, temporarily.
+  `gh api` is deliberately not allowed: it can write with `-X`, and the review
+  gets the same data from `gh pr view --json` / `gh pr diff`. A sub-agent
+  that improvises one still trips the gate, which is the intended trade-off.
 - **The CodeRabbit app install is a manual browser step** and cannot be
   automated: <https://github.com/apps/coderabbitai>. The committed
   `.coderabbit.yaml` only configures it once installed.
