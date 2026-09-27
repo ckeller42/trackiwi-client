@@ -106,6 +106,7 @@
       "type": "geomap", "title": "Current position", "gridPos": { "h": 10, "w": 24, "x": 0, "y": 5 },
       "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
       "options": {
+        "basemap": { "type": "osm-standard", "name": "OpenStreetMap", "config": {} },
         "view": { "id": "fit", "zoom": 13 },
         "layers": [
           { "type": "markers", "name": "Position", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" } }
@@ -123,6 +124,7 @@
       "type": "geomap", "title": "Route", "gridPos": { "h": 12, "w": 24, "x": 0, "y": 16 },
       "datasource": { "type": "influxdb", "uid": "${DS_TRACKIWI}" },
       "options": {
+        "basemap": { "type": "osm-standard", "name": "OpenStreetMap", "config": {} },
         "view": { "id": "fit" },
         "layers": [
           { "type": "route", "name": "Route", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" } }

@@ -265,6 +265,9 @@ The dashboard is **Flux**, so it requires InfluxDB 2.x or InfluxDB Cloud, and
 Grafana 10 or later. The ingest itself also writes to InfluxDB 1.x (`version = 1`,
 `database = …`), but 1.x users need their own dashboard.
 
+The two map panels use the **OpenStreetMap** basemap (`osm-standard`), which needs no API
+key. Grafana's default basemap (CARTO) now shows "API KEY REQUIRED" tiles instead of a map.
+
 ## Security
 
 > ⚠️ **The token is stored in plaintext — read this if the tracker is in a
