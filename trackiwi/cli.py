@@ -21,6 +21,7 @@ from typing import Any
 
 from .client import AuthError, Client, InsecureApiBaseError, TrackiwiError
 from .export import FORMATS
+from .heading import DEFAULT_STALE_AFTER, Heading, estimate_headings
 from .influx import InfluxWriter, load_config, mirror
 from .store import Store, cache_files, default_db_path
 
@@ -304,6 +305,31 @@ READ_DESCRIPTIONS = {
 }
 
 
+HEADING_DESCRIPTION = (
+    "Estimate which way each tracked vehicle is pointing, from the cached "
+    "positions. One tab-separated line per tracker: id, heading in degrees "
+    "clockwise from true north, state, source, when it last moved (UTC) and "
+    "for how many seconds it has been parked.\n\n"
+    "STATE is the confidence flag. 'moving': the latest fix has speed > 0 and "
+    "the heading is its GPS course. 'freshly_parked': the vehicle is "
+    "stationary and last moved within --stale-after seconds; the heading is "
+    "the direction it was travelling as it came to rest. 'stale': the same "
+    "estimate, but the last movement is older than --stale-after. 'unknown': "
+    "no fix has ever shown movement, so there is nothing to estimate from.\n\n"
+    "SOURCE is 'bearing' when the parked heading is the great-circle bearing "
+    "between the last two moving positions (preferred: the raw course field "
+    "is noisy at low speed), 'course' when only the raw field was available "
+    "(a single moving fix, or two at the same spot), 'none' with no heading.\n\n"
+    "CAVEATS: the parked heading assumes the vehicle stopped nose-first in "
+    "its direction of travel. A vehicle that reversed into its spot points "
+    "the OPPOSITE way, and nothing in the data can reveal that. GPS alone "
+    "cannot sense a stationary vehicle's true heading; every value printed "
+    "here is an estimate.\n\n"
+    "Read-only and offline: reads the local cache only, never the API. Run "
+    "'trackiwi sync' first to have current positions."
+)
+
+
 def _sync_into_cache(client: Client, full: bool) -> None:
     """Fetch new positions into the local cache, reporting progress."""
     if not client.authenticated:
@@ -446,6 +472,62 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _heading_line(tracker_id: object, heading: Heading) -> str:
+    """Render one tracker's estimate as a tab-separated line.
+
+    Columns: tracker id, degrees (one decimal, ``-`` when unknown), state,
+    source, when the vehicle last moved (UTC, ``-`` when never), and how long
+    it has been parked in seconds (``-`` while moving or unknown). Nothing
+    here is a coordinate: the heading says which way the vehicle points, not
+    where it is.
+    """
+    degrees = "-" if heading.degrees is None else f"{heading.degrees:.1f}"
+    moved_at = (
+        "-"
+        if heading.moved_at is None
+        else datetime.fromtimestamp(heading.moved_at, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
+    return "\t".join(
+        (
+            _cell(tracker_id),
+            degrees,
+            heading.state,
+            heading.source,
+            moved_at,
+            _cell(heading.parked_for),
+        )
+    )
+
+
+def cmd_heading(args: argparse.Namespace) -> int:
+    """Print each tracker's estimated heading and confidence state.
+
+    Implements :need:`REQ_HEADING_ESTIMATE` and :need:`REQ_HEADING_STATE`.
+
+    Pure arithmetic over the cache: no request is made, and like `export` the
+    command never creates the cache as a side effect. Without a cache there
+    is nothing to estimate; with ``--tracker`` an id with no rows still prints
+    an ``unknown`` line, so a script reading the output sees a row per
+    requested tracker.
+    """
+    if args.stale_after < 0:
+        raise TrackiwiError("--stale-after must be zero or more seconds")
+    if default_db_path().exists():
+        with Store() as store:
+            rows = store.query(tracker_id=args.tracker)
+    else:
+        rows = []
+    headings = estimate_headings(rows, stale_after=args.stale_after)
+    if args.tracker is not None and args.tracker not in headings:
+        headings[args.tracker] = Heading(None, "unknown", "none", None, None)
+    if not headings:
+        print("nothing cached yet — run 'trackiwi sync' first", file=sys.stderr)
+        return 0
+    for tracker_id, heading in headings.items():
+        print(_heading_line(tracker_id, heading))
+    return 0
+
+
 def cmd_purge(args: argparse.Namespace) -> int:
     """Delete the local position cache, including SQLite sidecars.
 
@@ -523,6 +605,23 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--tracker", type=int, help="limit to one tracker id")
     export.add_argument("-o", "--output", help="write to a file instead of stdout")
     export.set_defaults(func=cmd_export)
+
+    heading = sub.add_parser(
+        "heading",
+        help="estimate which way each vehicle is pointing (from the cache)",
+        description=HEADING_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    heading.add_argument("--tracker", type=int, help="limit to one tracker id")
+    heading.add_argument(
+        "--stale-after",
+        type=int,
+        default=DEFAULT_STALE_AFTER,
+        metavar="SECONDS",
+        help="seconds since the last movement after which a parked estimate is "
+        f"reported as 'stale' (default {DEFAULT_STALE_AFTER})",
+    )
+    heading.set_defaults(func=cmd_heading)
 
     purge = sub.add_parser("purge", help="delete the local position cache")
     purge.add_argument("--yes", action="store_true", help="confirm deletion")

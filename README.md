@@ -48,6 +48,7 @@ trackiwi trackers               # list your devices
 trackiwi sync                   # fetch new positions (resumable)
 trackiwi sync --full            # restart from the beginning instead of resuming
 trackiwi export --format gpx --from 2026-09-16 --to 2026-09-25 -o route.gpx
+trackiwi heading                 # which way is each vehicle pointing? (see below)
 trackiwi logout                  # revokes the session server-side
 trackiwi purge --yes             # delete the local cache
 ```
@@ -93,6 +94,41 @@ Timestamps in these listings are printed exactly as the API sends them, which
 for these endpoints is an ISO 8601 string — *not* the epoch integer the
 position sync uses. Both forms occur in this API and mean the same kind of
 thing; see the units note below.
+
+### Which way is the vehicle pointing?
+
+```bash
+trackiwi heading                       # one line per tracker, from the cache
+trackiwi heading --tracker 7 --stale-after 900
+```
+
+The feed has exactly one directional field, `course`, and it is GPS
+course-over-ground: the direction of *travel*. While the vehicle moves it is
+the heading. Once parked it drifts, and reading it at zero speed as "which way
+the van points" is wrong most of the time. There is no compass in the data, so
+a parked heading can only be *inferred* from the approach. `heading` does that
+and says how much to trust it, printing tab-separated: tracker id, degrees
+clockwise from true north, state, source, when it last moved (UTC) and for how
+many seconds it has been parked.
+
+- **`moving`**: the latest fix has `speed > 0`; the heading is its `course`.
+- **`freshly_parked`**: stationary, and the last movement was within
+  `--stale-after` seconds (default 3600). The heading is the direction of
+  approach — the great-circle bearing between the last two moving fixes
+  (`source` `bearing`), which beats the raw `course` at low speed. With only
+  one moving fix, or two at the same spot, it falls back to that fix's
+  `course` (`source` `course`).
+- **`stale`**: the same estimate, but the last movement is older than
+  `--stale-after`. Still printed; trust it less.
+- **`unknown`**: no fix has ever shown movement. Nothing to estimate from.
+
+**Caveats.** The parked heading assumes the vehicle stopped nose-first in its
+direction of travel. A vehicle that reversed into its spot points the
+*opposite* way and nothing in the data can tell you so. GPS alone cannot sense
+a stationary vehicle's true heading; every value is an estimate. The command is
+offline and read-only: it reads the local cache and never the API (run `sync`
+first), never creates the cache, and prints no coordinates. The same logic is
+available as `trackiwi.heading.estimate_heading()` for library use.
 
 ### Field units
 

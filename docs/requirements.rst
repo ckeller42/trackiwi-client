@@ -194,6 +194,35 @@ Export
    (distance in metres, voltage in volts). NULL optional columns are omitted,
    tag values are escaped, and non-finite values are rejected. (Influx spec §4.)
 
+Heading
+-------
+
+.. req:: A heading is estimated from cached positions, read-only
+   :id: REQ_HEADING_ESTIMATE
+   :tags: heading, safety
+
+   The heading helper is pure arithmetic over cached positions: no request is
+   made and the cache is never created by it. Moving (``speed > 0``): the
+   heading is the fix's ``course``. Parked: the heading is the initial
+   great-circle bearing between the last two moving fixes of the *same*
+   tracker, in ``[0, 360)`` and correct across the antimeridian; only when
+   that bearing is undefined (one moving fix, or two at the same spot) the
+   last moving fix's raw ``course`` is used. No moving fix at all yields
+   ``unknown``, never an error, and a NULL or non-finite cached field never
+   raises. The caveats — a vehicle that reversed into its spot points the
+   opposite way, and GPS alone cannot sense a stationary heading — are stated
+   in the library docstring and the command's ``--help``. (Issue #3.)
+
+.. req:: The heading carries a confidence state with a configurable threshold
+   :id: REQ_HEADING_STATE
+   :tags: heading
+
+   Every estimate carries a state: ``moving``, ``freshly_parked`` (last
+   movement no more than ``stale_after`` seconds ago), ``stale`` (older) or
+   ``unknown``. ``stale_after`` defaults to the documented
+   ``DEFAULT_STALE_AFTER`` (3600 s) and is a parameter of the library
+   function and a flag (``--stale-after``) of the command. (Issue #3.)
+
 Mirror
 ------
 

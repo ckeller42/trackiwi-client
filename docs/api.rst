@@ -36,10 +36,18 @@ fails the build under ``-W``, which catches a typo'd requirement ID.
    :undoc-members:
    :private-members: _by_tracker, _finite
 
+``trackiwi.heading``
+--------------------
+
+.. automodule:: trackiwi.heading
+   :members:
+   :undoc-members:
+   :private-members: _bearing_between, _approach
+
 ``trackiwi.cli``
 ----------------
 
 .. automodule:: trackiwi.cli
    :members:
    :undoc-members:
-   :private-members: _write_atomically
+   :private-members: _write_atomically, _heading_line

@@ -41,8 +41,10 @@
 - `trackiwi/client.py`: network I/O only (auth, sync, the read-only list reads).
 - `trackiwi/store.py`: SQLite cache only.
 - `trackiwi/export.py`: pure functions producing GPX / GeoJSON / CSV.
+- `trackiwi/heading.py`: pure heading estimate (bearing between the last two
+  moving fixes, `moving`/`freshly_parked`/`stale`/`unknown` state) from cached rows.
 - `trackiwi/cli.py`: command wiring and all user interaction, including the
-  `influx check`, `influx push` and `ingest` (sync, then push) commands.
+  `heading`, `influx check`, `influx push` and `ingest` (sync, then push) commands.
 - `trackiwi/__init__.py`: shared contracts — `TrackiwiError`, `AuthError`, the
   `COLUMNS` tuple, `__version__`. `client.py` and `store.py` never import each
   other.
