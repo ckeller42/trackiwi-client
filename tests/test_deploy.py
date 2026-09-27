@@ -131,6 +131,72 @@ def test_dockerfile_copies_only_what_the_build_needs():
         assert set(sources) <= allowed, f"COPY of {sources} (allowed: {sorted(allowed)})"
 
 
+def _compose_service_blocks():
+    """Map service name -> its indented block of docker-compose.yml (no YAML parser needed)."""
+    text = (DEPLOY / "docker-compose.yml").read_text()
+    services = text.split("\nservices:\n", 1)[1].split("\nvolumes:\n", 1)[0]
+    blocks: dict[str, list[str]] = {}
+    name = None
+    for line in services.splitlines():
+        if re.match(r"^  [a-z][a-z0-9_-]*:\s*$", line):
+            name = line.strip().rstrip(":")
+            blocks[name] = []
+        elif name:
+            blocks[name].append(line)
+    return {k: "\n".join(v) for k, v in blocks.items()}
+
+
+def test_published_ports_bind_to_loopback_by_default():
+    """REQ_DEPLOY_LEAST_EXPOSURE: no port reaches the LAN unless deliberately configured.
+
+    Each `ports:` entry must carry a host address that is either the literal
+    loopback or a variable *defaulting* to it, so a bare `deploy/.env` (the
+    example with placeholders filled in) publishes nothing beyond this machine.
+    """
+    compose = (DEPLOY / "docker-compose.yml").read_text()
+    entries = re.findall(r'^\s+- "([^"]*:\d+:\d+)"\s*$', compose, flags=re.M)
+    assert entries, "the compose file publishes at least InfluxDB and Grafana"
+    for entry in entries:
+        host, _, _ = entry.rpartition(":")
+        host, _, _ = host.rpartition(":")
+        assert host == "127.0.0.1" or re.fullmatch(r"\$\{[A-Z_][A-Z0-9_]*:-127\.0\.0\.1\}", host), (
+            f"port mapping {entry!r} is not bound to 127.0.0.1 by default"
+        )
+
+
+def test_lan_exposure_is_opt_in_and_documented():
+    """Bind-address variables: defaulted in compose, commented out in example.env, in the README."""
+    compose = (DEPLOY / "docker-compose.yml").read_text()
+    example = (DEPLOY / "example.env").read_text()
+    readme = (ROOT / "README.md").read_text()
+    for var in ("INFLUXDB_BIND_ADDRESS", "GRAFANA_BIND_ADDRESS"):
+        assert f"${{{var}:-127.0.0.1}}" in compose, var
+        assert var not in _env_keys(), f"{var} must stay commented out in example.env"
+        assert f"# {var}=" in example, f"{var} is not shown in example.env"
+        assert var in readme, f"README does not document {var}"
+
+
+def test_ingest_never_receives_the_admin_token():
+    """REQ_DEPLOY_LEAST_EXPOSURE: the ingest gets a bucket-scoped token, never the operator token.
+
+    The operator token (`INFLUXDB_TOKEN`, InfluxDB's `DOCKER_INFLUXDB_INIT_ADMIN_TOKEN`)
+    can read and delete every bucket; the ingest needs read + write on one.
+    """
+    blocks = _compose_service_blocks()
+    assert "${INFLUXDB_INGEST_TOKEN}" in blocks["ingest"]
+    assert "${INFLUXDB_TOKEN}" not in blocks["ingest"]
+    assert "INFLUXDB_INGEST_TOKEN" in _env_keys()
+
+
+def test_documented_ingest_token_scope_is_read_and_write_on_the_bucket():
+    """`influx check` lists buckets (read) and `push` writes; both flags must appear together."""
+    for path in (DEPLOY / "example.env", ROOT / "README.md"):
+        text = path.read_text()
+        for flag in ("influx auth create", "--write-bucket", "--read-bucket"):
+            assert flag in text, f"{path.name} lacks {flag}"
+        assert "--all-access" not in text and "--operator" not in text, path.name
+
+
 def test_systemd_service_reads_the_optional_influx_env_file():
     """A user unit sees no shell-rc variables; the token must reach it another way."""
     lines = (DEPLOY / "systemd" / "trackiwi-ingest.service").read_text().splitlines()

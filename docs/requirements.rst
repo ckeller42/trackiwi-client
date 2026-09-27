@@ -237,6 +237,17 @@ Mirror
    values are placeholders, and every variable the compose file uses is
    defined in ``deploy/example.env``. (Influx spec §6.)
 
+.. req:: The compose stack exposes as little as possible
+   :id: REQ_DEPLOY_LEAST_EXPOSURE
+   :tags: security, influx
+
+   Every port ``deploy/docker-compose.yml`` publishes binds to ``127.0.0.1``
+   unless a bind-address variable is set deliberately, and the ingest
+   container receives a token scoped to read and write on the trackiwi bucket
+   only — never the operator token. Read is required because ``influx check``
+   confirms the bucket exists through ``GET /api/v2/buckets``, which lists only
+   the buckets the token may read. (Influx spec §7.1.)
+
 .. req:: The dashboard is importable anywhere
    :id: REQ_DASHBOARD_PORTABLE
    :tags: portability, influx

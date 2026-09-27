@@ -227,6 +227,15 @@ Verifying tests
    ``tests/test_deploy.py::test_dockerfile_copies_only_what_the_build_needs``,
    ``tests/test_deploy.py::test_systemd_service_reads_the_optional_influx_env_file``
 
+.. test:: Compose binds to loopback and the ingest token is bucket-scoped
+   :id: TEST_DEPLOY_LEAST_EXPOSURE
+   :verifies: REQ_DEPLOY_LEAST_EXPOSURE
+
+   ``tests/test_deploy.py::test_published_ports_bind_to_loopback_by_default``,
+   ``tests/test_deploy.py::test_lan_exposure_is_opt_in_and_documented``,
+   ``tests/test_deploy.py::test_ingest_never_receives_the_admin_token``,
+   ``tests/test_deploy.py::test_documented_ingest_token_scope_is_read_and_write_on_the_bucket``
+
 .. test:: Dashboard uses variables only and holds no real values
    :id: TEST_DASHBOARD_PORTABLE
    :verifies: REQ_DASHBOARD_PORTABLE

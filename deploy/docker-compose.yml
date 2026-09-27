@@ -1,8 +1,17 @@
-# Turnkey stack: InfluxDB 2 + Grafana + trackiwi ingest.
+# Turnkey stack: InfluxDB 2 + Grafana + trackiwi ingest. Setup, in order
+# (README "Option A" has the full walk-through):
 #   cp deploy/example.env deploy/.env      # then replace every changeme value
+#   docker compose -f deploy/docker-compose.yml up -d influxdb
+#   ... create the scoped ingest token (README), put it in deploy/.env ...
 #   docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login
 #   docker compose -f deploy/docker-compose.yml up -d
 # Grafana: http://localhost:3000 (admin / GRAFANA_ADMIN_PASSWORD)
+#
+# Published ports bind to 127.0.0.1 by default: InfluxDB and Grafana are
+# reachable from this machine only, and the ingest container talks to InfluxDB
+# over the compose network, never through a published port. To expose either
+# to the LAN deliberately, set INFLUXDB_BIND_ADDRESS / GRAFANA_BIND_ADDRESS in
+# deploy/.env (see README "Exposing the stack to the LAN").
 services:
   influxdb:
     image: influxdb:2
@@ -15,7 +24,7 @@ services:
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUXDB_TOKEN}
     ports:
-      - "8086:8086"
+      - "${INFLUXDB_BIND_ADDRESS:-127.0.0.1}:8086:8086"
     volumes:
       - influxdb-data:/var/lib/influxdb2
       - influxdb-config:/etc/influxdb2
@@ -31,7 +40,7 @@ services:
       INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
       INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
     ports:
-      - "3000:3000"
+      - "${GRAFANA_BIND_ADDRESS:-127.0.0.1}:3000:3000"
     volumes:
       - ./grafana-provisioning:/etc/grafana/provisioning:ro
       - ./grafana-dashboards:/var/lib/grafana/dashboards:ro
@@ -49,7 +58,11 @@ services:
       TRACKIWI_INFLUX_VERSION: "2"
       TRACKIWI_INFLUX_ORG: ${INFLUXDB_ORG}
       TRACKIWI_INFLUX_BUCKET: ${INFLUXDB_BUCKET}
-      TRACKIWI_INFLUX_TOKEN: ${INFLUXDB_TOKEN}
+      # Not the admin token: a token scoped to read + write on this one
+      # bucket (README "Option A" shows the `influx auth create` call). Write
+      # is what `push` needs; read is what `influx check` needs to see the
+      # bucket exists (`GET /api/v2/buckets` lists only readable buckets).
+      TRACKIWI_INFLUX_TOKEN: ${INFLUXDB_INGEST_TOKEN}
       TRACKIWI_INGEST_INTERVAL: ${TRACKIWI_INGEST_INTERVAL:-600}
     volumes:
       # Holds ~/.config/trackiwi (session) and ~/.local/share/trackiwi (the
