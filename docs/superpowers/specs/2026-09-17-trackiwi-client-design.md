@@ -302,8 +302,15 @@ trackiwi trackers
 trackiwi sync [--full]
 trackiwi export --format gpx|geojson|csv [--from DATE] [--to DATE]
                [--tracker ID] [-o FILE]
-trackiwi purge
+trackiwi purge --yes
 ```
+
+> **Note (2026-09-27):** this synopsis is the original design and is kept as
+> such. Commands added since: `tours`, `alarms`, `markers`,
+> `marker-categories`, `shares` (read-only live lists), `influx check`,
+> `influx push` and `ingest` (the InfluxDB mirror — see
+> `2026-09-25-influx-ingest-grafana-design.md`). `purge` requires `--yes`.
+> `trackiwi --help` is authoritative.
 
 - `login` prompts for the password via `getpass`; it is never echoed, never
   logged, and never written to disk.

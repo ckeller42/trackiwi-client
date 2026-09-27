@@ -15,7 +15,8 @@ dependencies = []
 
 [project.optional-dependencies]
 # The package itself has ZERO runtime dependencies; everything here is tooling.
-# sphinx-needs is pinned because its config API (needs_extra_links, needs_warnings,
+# sphinx-needs is pinned because its config API (needs_links, which replaced the
+# deprecated needs_extra_links; needs_warnings;
 # the -W build-failure behaviour) is version-sensitive; sphinx is capped so a
 # future major cannot silently change the traceability gate.
 dev = [
