@@ -452,8 +452,13 @@ tooling), then run the gate:
 
 ```bash
 .venv/bin/pip install -e ".[dev]"
+.venv/bin/pre-commit install   # commit hooks + pre-push (mypy, tests)
 ./tools/ci.sh     # the same gates CI runs: pre-commit, strict mypy, pytest with coverage, …
 ```
+
+`.pre-commit-config.yaml` pins every lint and scan tool (ruff, gitleaks,
+detect-secrets, markdownlint-cli2, actionlint) and CI runs exactly that, so
+local and CI results agree.
 
 No private data may enter this repository. A pre-commit hook blocks databases,
 track exports outside `tests/fixtures/synthetic-*`, credential files

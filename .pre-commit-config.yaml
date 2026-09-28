@@ -1,3 +1,8 @@
+# pre-commit is the single source of truth for lint/scan tool versions: CI runs
+# `pre-commit run --all-files` and nothing else for these (house baseline).
+# `pre-commit install` wires both stages below; mypy and the test suite are
+# pre-push only, because they are too slow for every commit.
+default_install_hook_types: [pre-commit, pre-push]
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
@@ -8,13 +13,33 @@ repos:
       - id: trailing-whitespace
       - id: detect-private-key
       - id: check-yaml
+  # Keep in step with the `ruff==` pin in pyproject.toml's [dev] extra.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.8
+    rev: v0.16.9
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
-        types_or: [python, pyi, jupyter]
+        types_or: [python, pyi]
+  # Three secret scanners, deliberately (defence-in-depth, see AGENTS.md):
+  # gitleaks, detect-secrets and the home-rolled SECRET_RE guard below.
+  #
+  # gitleaks' stock hook scans only the *staged* diff, so under
+  # `pre-commit run --all-files` it has nothing to scan. The second entry
+  # (house pattern, same repo+rev, no separate binary) scans the working tree;
+  # it is manual-stage and run explicitly by CI and tools/ci.sh:
+  #   pre-commit run --hook-stage manual gitleaks-dir --all-files
+  # `.gitleaks.toml` allowlists only the hashed fakes in .secrets.baseline.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+      - id: gitleaks
+        alias: gitleaks-dir
+        name: gitleaks (working tree)
+        entry: gitleaks dir --redact --verbose --config .gitleaks.toml .
+        pass_filenames: false
+        stages: [manual]
   # Maintained secret scanner, defence-in-depth alongside the home-rolled
   # SECRET_RE in tools/check_no_private_data.py. The baseline holds only known
   # synthetic/test fakes (hashed); any new token-shaped string not in it fails.
@@ -23,6 +48,17 @@ repos:
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
+  - repo: https://github.com/DavidAnson/markdownlint-cli2
+    rev: v0.23.3
+    hooks:
+      - id: markdownlint-cli2
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        # `concurrency.queue` (dependabot-auto-merge.yml) is newer than
+        # actionlint's schema; it is used deliberately, see that file.
+        args: ["-ignore", 'unexpected key "queue" for "concurrency" section']
   - repo: local
     hooks:
       - id: no-private-data
@@ -30,3 +66,19 @@ repos:
         entry: python3 tools/check_no_private_data.py
         language: system
         pass_filenames: true
+      # Slow gates: pre-push only. They use the project venv (see AGENTS.md
+      # "Gotchas": the system python3 may be too old), like tools/ci.sh.
+      - id: mypy
+        name: mypy (strict)
+        entry: .venv/bin/mypy
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+      - id: pytest
+        name: pytest (with coverage gate)
+        entry: .venv/bin/pytest -q --cov=trackiwi --cov-fail-under=95
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

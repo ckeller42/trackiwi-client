@@ -1,4 +1,4 @@
-# Staged CI, house style. Stages: test matrix -> single-version gates.
+# House-style CI: pre-commit gates, test matrix, strict mypy, docs/traceability.
 name: CI
 on:
   push: { branches: [main] }
@@ -8,45 +8,64 @@ concurrency:
   cancel-in-progress: true          # read-only jobs only
 permissions: { contents: read }
 jobs:
+  # Version-independent gates run ONCE, on the target version — not across the matrix.
+  #
+  # This must be `pre-commit run --all-files` rather than a bare `ruff` call, for two
+  # reasons:
+  #   1. The ruff-format hook is deliberately scoped to Python. A bare `ruff format`
+  #      also rewrites Python code fences inside docs/, which would fail this stage
+  #      on a repo whose docs are correct.
+  #   2. It is the third enforcement layer for the no-private-data guard. The local
+  #      hook can be bypassed with `git commit --no-verify`; this cannot.
+  # pre-commit is the single source of truth for tool versions (ruff, gitleaks,
+  # markdownlint-cli2, detect-secrets), so there are no separate lint jobs.
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -e ".[dev]"
+      # Cache the hook environments so the gate stays fast.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-py3.13-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Gates (lint, format, markdown, secrets, private-data guard)
+        run: pre-commit run --all-files --show-diff-on-failure
+      # The stock gitleaks hook scans only staged changes, a no-op under
+      # --all-files; this manual-stage twin scans the checked-out tree.
+      - name: gitleaks (working tree)
+        run: pre-commit run --hook-stage manual gitleaks-dir --all-files
+
   test:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.13"]    # floor from requires-python, plus the version used locally
+        python: ["3.11", "3.12", "3.13"]    # floor from requires-python .. the buspi target
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "${{ matrix.python }}", cache: pip }
       - run: pip install -e ".[dev]"
       # The package itself has zero runtime dependencies; [dev] brings pytest/ruff/pre-commit.
       - run: python -m pytest -q --cov=trackiwi --cov-report=term-missing --cov-fail-under=95
-      # Cache the hook environments so the gate stage stays fast.
-      - uses: actions/cache@v6
-        if: matrix.python == '3.13'
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-py3.13-${{ hashFiles('.pre-commit-config.yaml') }}
-      # Version-independent gates run ONCE, on the target version — not across the matrix.
-      #
-      # This must be `pre-commit run --all-files` rather than a bare `ruff` call, for two
-      # reasons:
-      #   1. The ruff-format hook is deliberately scoped to Python. A bare `ruff format`
-      #      also rewrites Python code fences inside docs/, which would fail this stage
-      #      on a repo whose docs are correct.
-      #   2. It is the third enforcement layer for the no-private-data guard. The local
-      #      hook can be bypassed with `git commit --no-verify`; this cannot.
-      - name: Gates (lint, format, private-data guard)
-        if: matrix.python == '3.13'
-        run: pre-commit run --all-files --show-diff-on-failure
-      # Static type gate (strict). Version-independent, so it runs ONCE on the
-      # target version, not across the matrix (house style). A direct `mypy`
-      # call over the installed package — not a mirrors-mypy pre-commit hook —
-      # so it type-checks the real sources and reads the [tool.mypy] config
-      # rather than an isolated hook environment. `python_version` in the config
-      # keeps the checked semantics at the 3.11 floor regardless of the runner.
+
+  # Static type gate (strict). Version-independent, so it runs ONCE on the
+  # target version, not across the matrix (house style). A direct `mypy`
+  # call over the installed package — not a mirrors-mypy pre-commit hook —
+  # so it type-checks the real sources and reads the [tool.mypy] config
+  # rather than an isolated hook environment. `python_version` in the config
+  # keeps the checked semantics at the 3.11 floor regardless of the runner.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.13", cache: pip }
+      - run: pip install -e ".[dev]"
       - name: Type check (mypy strict)
-        if: matrix.python == '3.13'
         run: mypy
 
   # Docs + traceability gate. Version-independent, so it runs ONCE on the target
@@ -59,8 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions: { contents: read }
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
       - name: Doctests (pure functions only)

@@ -27,6 +27,13 @@ ALLOWED_TRACK_DIR = "tests/fixtures"
 ALLOWED_TRACK_BASENAME_PREFIX = "synthetic-"
 TEXT_SUFFIXES = {".py", ".md", ".txt", ".toml", ".yaml", ".yml", ".json", ".cfg", ".ini", ".sh"}
 SECRET_RE = re.compile(r"\b(?:[A-Fa-f0-9]{32,}|[A-Za-z0-9+/]{40,}={0,2})\b")
+#: The one place a 40-hex string is expected: a GitHub Actions ``uses:`` ref
+#: pinned to a full commit SHA (supply-chain hardening), in a workflow file.
+#: Only the ``@<sha>`` of such a line is exempted — it is removed before the
+#: scan, so the rest of the line (the action name, a ``# vX.Y.Z`` comment) is
+#: still checked, and a 40-hex string anywhere else still blocks.
+WORKFLOW_DIR = ".github/workflows/"
+ACTION_PIN_RE = re.compile(r"^(\s*(?:-\s+)?uses:\s*[\w.-]+/[\w./-]+)@[0-9a-f]{40}(?=\s|$)")
 SELF = "tools/check_no_private_data.py"
 SQLITE_HEADER = b"SQLite format 3\x00"
 
@@ -115,6 +122,8 @@ def check_paths(paths: Iterable[str]) -> list[str]:
         for lineno, line in enumerate(text.splitlines(), 1):
             if "allow-secret" in line:
                 continue
+            if path.startswith(WORKFLOW_DIR):
+                line = ACTION_PIN_RE.sub(r"\1", line)
             match = SECRET_RE.search(line)
             if match:
                 problems.append(f"{path}:{lineno}: token-shaped string {match.group(0)[:8]}...")

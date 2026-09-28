@@ -1,0 +1,22 @@
+{
+  // markdownlint-cli2: the ONE markdownlint config for this repo (run by the
+  // pre-commit hook, so locally and in CI with the same pinned version).
+  "config": {
+    "default": true,
+    // Prose is wrapped by hand; tables, URLs and command lines legitimately
+    // run long, and reflowing them would be churn with no reader benefit.
+    "MD013": false,
+    // Table pipe alignment is cosmetic; enforcing it rewrites every table.
+    "MD060": false
+  },
+  "ignores": [
+    // A one-line `@AGENTS.md` import for Claude Code, not a document.
+    "CLAUDE.md",
+    // Dated design specs and implementation plans: historical records, kept
+    // as written rather than reformatted after the fact.
+    "docs/superpowers/**",
+    // Build output and local environments.
+    "docs/_build/**",
+    ".venv/**"
+  ]
+}

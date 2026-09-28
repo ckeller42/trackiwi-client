@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 .venv/bin/pre-commit run --all-files
+# gitleaks' stock hook scans only staged changes (nothing under --all-files);
+# its manual-stage twin scans the working tree, exactly as CI does.
+.venv/bin/pre-commit run --hook-stage manual gitleaks-dir --all-files
 # Static type gate (strict; config in pyproject.toml). Run as a direct `mypy`
 # invocation rather than a pre-commit hook: the package is installed in this
 # venv, so mypy resolves the real `trackiwi`/`tools` sources and reads the

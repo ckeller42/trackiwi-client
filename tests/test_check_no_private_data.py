@@ -183,3 +183,41 @@ def test_allow_secret_marker_suppresses(tmp_path, monkeypatch):
     secret = "a" * 44
     rel = _write(tmp_path, "notes.md", f"token = {secret}  # allow-secret\n")
     assert check_paths([rel]) == []
+
+
+# --- SHA-pinned GitHub Actions: the only exempted 40-hex string ---------------
+# Built, not written out: a literal 40-hex string here would trip the guard itself.
+PIN = "0123456789abcdef" * 2 + "01234567"
+
+
+def test_sha_pinned_action_in_a_workflow_passes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        f"steps:\n  - uses: actions/checkout@{PIN} # v7.0.1\n"
+        f"    uses: anthropics/claude-code-action@{PIN}\n",
+    )
+    assert check_paths([rel]) == []
+
+
+def test_sha_pin_exemption_is_scoped_to_workflows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, "notes.md", f"uses: actions/checkout@{PIN}\n")
+    assert any("token-shaped" in p for p in check_paths([rel]))
+
+
+def test_sha_pin_exemption_still_scans_rest_of_line(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(
+        tmp_path,
+        ".github/workflows/ci.yml",
+        f"  - uses: actions/checkout@{PIN} # {'b' * 44}\n",
+    )
+    assert any("token-shaped" in p for p in check_paths([rel]))
+
+
+def test_40_hex_elsewhere_in_a_workflow_is_blocked(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, ".github/workflows/ci.yml", f"    env: {{ SHA: {PIN} }}\n")
+    assert any("token-shaped" in p for p in check_paths([rel]))

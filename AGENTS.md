@@ -141,14 +141,23 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   apply the moment the repo goes public or the plan changes.
 - Do not self-merge past unresolved CodeRabbit threads.
 - Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
-- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files`, strict
-  `mypy` (config in `[tool.mypy]`), `pytest` with coverage, the pure-function
-  doctests, the `sphinx-build -W` traceability build and `interrogate`,
-  mirroring CI exactly.
+- Local gate: `./tools/ci.sh` — runs `pre-commit run --all-files` (plus the
+  manual-stage `gitleaks-dir` working-tree scan), strict `mypy` (config in
+  `[tool.mypy]`), `pytest` with coverage, the pure-function doctests, the
+  `sphinx-build -W` traceability build and `interrogate`, mirroring CI exactly.
+- **Hooks:** run `.venv/bin/pre-commit install` once per clone. It installs
+  both the `pre-commit` stage (whitespace/EOF/YAML checks, ruff + ruff-format,
+  gitleaks on the staged diff, detect-secrets, markdownlint-cli2, actionlint,
+  the private-data guard) and the `pre-push` stage (strict mypy and the test
+  suite with its coverage gate, via `.venv/bin`). `.pre-commit-config.yaml` is
+  the single source of truth for lint/scan tool versions; the `ruff==` pin in
+  the `[dev]` extra is kept in step with the ruff-pre-commit `rev` by hand.
+  Markdown lint config is `.markdownlint-cli2.jsonc` (the only one); it skips
+  the dated plans/specs under `docs/superpowers/`.
 - **Requirements live as `sphinx-needs` objects in `docs/`.** Each requirement
   is a `.. req::` with a stable `REQ_*` id in `docs/requirements.rst`; the
   implementing function's docstring references it the sphinx way
-  (`Implements :need:\`REQ_…\`.`); and `docs/traceability.rst` has a `.. test::`
+  (``Implements :need:`REQ_…`.``); and `docs/traceability.rst` has a `.. test::`
   need that `:verifies:` it, naming the real test node id(s). **New code must
   add a requirement and a verifying `.. test::` — the docs build FAILS
   otherwise**: `conf.py`'s `req_without_test` rule flags any `req` with no
@@ -169,11 +178,16 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - **Coverage gate:** `pytest --cov=trackiwi --cov-fail-under=95` in both CI and
   `ci.sh`. Measured coverage is ~97%; the threshold is 95 (headroom for matrix
   variance). `[tool.coverage.*]` config lives in `pyproject.toml`.
-- **Secret scanner:** the `detect-secrets` pre-commit hook (pinned `v1.5.0`,
-  baseline `.secrets.baseline`) runs locally and in CI's gate stage. It is
-  **defence-in-depth alongside** the home-rolled `SECRET_RE` guard in
-  `tools/check_no_private_data.py`, not a replacement — keep both. The baseline
-  holds only hashed synthetic/test fakes; regenerate with
+- **Secret scanners (three, deliberately):** `gitleaks` (pinned `v8.30.1`,
+  config `.gitleaks.toml`), the `detect-secrets` pre-commit hook (pinned
+  `v1.5.0`, baseline `.secrets.baseline`) and the home-rolled `SECRET_RE`
+  guard in `tools/check_no_private_data.py`. They are **defence-in-depth**,
+  not replacements for each other — keep all three. gitleaks' stock hook
+  scans only the staged diff, so CI and `ci.sh` also run its manual-stage twin
+  `pre-commit run --hook-stage manual gitleaks-dir --all-files` over the
+  working tree. `.gitleaks.toml` allowlists exactly one thing: the
+  `"hashed_secret"` lines of `.secrets.baseline` (path AND line must
+  match). The baseline holds only hashed synthetic/test fakes; regenerate with
   `detect-secrets scan > .secrets.baseline` and audit before committing.
 - **Run with no install:** `python -m trackiwi …` (`trackiwi/__main__.py`) runs
   straight from a clone — the payoff of zero runtime deps; identical to the
@@ -202,7 +216,7 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   could enforce it were tried and both return the same thing on a private
   repo on the free plan:
 
-  ```
+  ```text
   Upgrade to GitHub Pro or make this repository public to enable this
   feature. (HTTP 403)
   ```
@@ -238,7 +252,10 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
           "strict_required_status_checks_policy": true,
           "do_not_enforce_on_create": false,
           "required_status_checks": [
-            { "context": "test (3.11)" }, { "context": "test (3.13)" } ] } },
+            { "context": "pre-commit" },
+            { "context": "test (3.11)" }, { "context": "test (3.12)" },
+            { "context": "test (3.13)" },
+            { "context": "typecheck" }, { "context": "docs" } ] } },
     { "type": "deletion" },
     { "type": "non_fast_forward" }
     ]
@@ -288,7 +305,7 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   already passed for that exact commit. It merges **minor/patch only**; majors
   are left for manual review. It deliberately does not rely on the repo's
   "Allow auto-merge" setting — do not enable that toggle expecting it to help.
-- **CI's gate stage runs `pre-commit run --all-files`, never a bare `ruff`
+- **CI's `pre-commit` job runs `pre-commit run --all-files`, never a bare `ruff`
   call.** Two reasons, both learned the hard way: the `ruff-format` hook is
   scoped to Python on purpose, and a bare `ruff format` also rewrites Python
   code fences inside `docs/` (it silently restructured a fenced snippet in the
@@ -393,6 +410,15 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - **This repo's own docs cannot quote a full 40-character commit SHA**:
   `SECRET_RE` in the guard matches it as a token-shaped string. Use short SHAs
   (what AGENTS.md and the ledger do) or append `# allow-secret`.
+  **The one exemption is a SHA-pinned action**: in `.github/workflows/` only,
+  the guard strips the `@<40-hex>` of a `uses: owner/repo@<sha>` line before
+  scanning it (`ACTION_PIN_RE`), so pins need no marker and the rest of the
+  line — including the `# vX.Y.Z` comment Dependabot rewrites — is still
+  scanned. A 40-hex string anywhere else in a workflow still blocks.
+- **Actions are pinned by full commit SHA** with a `# vX.Y.Z` comment
+  (Dependabot's `github-actions` ecosystem bumps both). Resolve a new pin with
+  `git ls-remote https://github.com/<owner>/<repo> refs/tags/<tag>` (use the
+  peeled `^{}` SHA for an annotated tag).
 
 ## Offset semantics in `sync` (confirmed exclusive)
 
