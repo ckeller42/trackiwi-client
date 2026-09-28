@@ -29,6 +29,8 @@ Verifying tests
 
    ``tests/test_check_no_private_data.py::test_database_is_blocked``,
    ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``,
+   ``tests/test_check_no_private_data.py::test_sha_pinned_action_in_a_workflow_passes``,
+   ``tests/test_check_no_private_data.py::test_sha_pin_exemption_is_scoped_to_workflows``,
    ``tests/test_check_no_private_data.py::test_influx_credential_files_are_blocked``,
    ``tests/test_check_no_private_data.py::test_influx_templates_stay_committable``
 

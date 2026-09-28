@@ -1,0 +1,16 @@
+# gitleaks config: the default ruleset plus ONE narrow allowlist.
+#
+# .secrets.baseline (detect-secrets' baseline) stores the SHA-1 of each known
+# synthetic/test fake as `"hashed_secret": "<40 hex>"`, which gitleaks'
+# generic-api-key rule reads as a key. Both conditions must hold (AND): the
+# path is exactly .secrets.baseline AND the line is a hashed_secret entry.
+# Anything else in that file, or that shape anywhere else, is still reported.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "detect-secrets baseline: hashes of synthetic fakes, not secrets"
+condition = "AND"
+paths = ['''^\.secrets\.baseline$''']
+regexTarget = "line"
+regexes = ['''^\s*"hashed_secret": "[0-9a-f]{40}",?$''']

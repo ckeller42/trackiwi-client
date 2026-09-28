@@ -27,7 +27,7 @@
 - [InfluxDB & Grafana spec](docs/superpowers/specs/2026-09-25-influx-ingest-grafana-design.md):
   the mirror into InfluxDB, the `influx`/`ingest` commands, and the Grafana
   dashboard and deploy stack.
-- [CLAUDE.md](CLAUDE.md): contributor rules, invariants verified against the live
+- [AGENTS.md](AGENTS.md): contributor and agent rules, invariants verified against the live
   API, and repo/CI setup.
 - [SECURITY.md](SECURITY.md): what is sensitive and how to report a concern.
 - [Requirements & traceability](docs/requirements.rst): every requirement as a
