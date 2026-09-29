@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .client import AuthError, Client, InsecureApiBaseError, TrackiwiError
+from .client import AuthError, Client, TrackiwiError
 from .export import FORMATS
 from .heading import DEFAULT_STALE_AFTER, Heading, estimate_headings
 from .influx import InfluxWriter, load_config, mirror
@@ -135,18 +135,18 @@ def cmd_logout(_: argparse.Namespace) -> int:
     """Revoke the session and remove local credentials.
 
     Implements :need:`REQ_LOGOUT_REVOKES`: revokes server-side when it can and,
-    when it cannot (including a stored non-https base), still removes the local
-    credentials and warns that the token may remain valid.
+    when it cannot, still removes the local credentials and warns that the
+    token may remain valid. Implements :need:`REQ_TOKEN_REMOVABLE`: a config
+    file that cannot be loaded is deleted all the same.
     """
     try:
         client = Client.load()
-    except InsecureApiBaseError as error:
-        # A stored `api_base` that fails validation used to make `logout`
-        # impossible: `Client.load()` raised before the revocation could run,
-        # so a token that grants live vehicle location could not be revoked
-        # *or* deleted with this tool (spec section 7.3 lists revocation on
-        # logout as a required mitigation). Revoking over the stored base is
-        # not an option — sending the token in cleartext is the very thing
+    except TrackiwiError as error:
+        # Whatever makes the config unloadable (a non-https `api_base`,
+        # truncated JSON, a wrong type) must not keep the token on disk: it
+        # grants live vehicle location and `logout` is the only way to remove
+        # it (spec section 7.3). Revoking over a non-https base is not an
+        # option — sending the token in cleartext is the very thing
         # `_require_https` prevents — so the local credential goes, loudly.
         Client.forget_local_session()
         print(

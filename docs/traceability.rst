@@ -162,6 +162,15 @@ Verifying tests
    ``tests/test_client_auth.py::test_logout_revokes_then_deletes_config``,
    ``tests/test_client_auth.py::test_logout_clears_local_state_even_if_revoke_fails``
 
+.. test:: logout removes a config it cannot load
+   :id: TEST_TOKEN_REMOVABLE
+   :verifies: REQ_TOKEN_REMOVABLE
+
+   ``tests/test_cli.py::test_logout_with_an_unloadable_config_still_removes_the_credentials``,
+   ``tests/test_cli.py::test_logout_with_an_http_api_base_still_removes_the_credentials``,
+   ``tests/test_client_auth.py::test_forget_local_session_removes_the_config``,
+   ``tests/test_client_auth.py::test_logout_reports_a_config_it_cannot_delete``
+
 .. test:: Line protocol uses natural units and escapes tags
    :id: TEST_LINEPROTOCOL_UNITS
    :verifies: REQ_LINEPROTOCOL_UNITS

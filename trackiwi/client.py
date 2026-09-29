@@ -265,19 +265,6 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
-class InsecureApiBaseError(TrackiwiError):
-    """The API base in hand is not usable over https.
-
-    Not a third exception type in the sense of the design spec's section 8
-    taxonomy: it is a `TrackiwiError`, carries the same message and produces
-    the same exit code, and nothing outside this package needs to know it
-    exists. It is here only so `cmd_logout` can tell "the stored base cannot
-    carry a request" apart from every other `TrackiwiError` and still remove
-    a credential that grants live vehicle location. Deliberately not exported
-    from `trackiwi/__init__.py`.
-    """
-
-
 def _require_https(api_base: str) -> str:
     """Return `api_base` without its trailing slash, insisting on https.
 
@@ -294,7 +281,7 @@ def _require_https(api_base: str) -> str:
     about it — see `Client.load` and `cmd_logout`.
     """
     if not api_base.lower().startswith("https://"):
-        raise InsecureApiBaseError(
+        raise TrackiwiError(
             f"the API base must start with https:// — got {api_base!r}; run 'trackiwi login' again"
         )
     return api_base.rstrip("/")
@@ -400,6 +387,8 @@ class Client:
         live vehicle location, so it must stay removable even when the config
         file holds a value that `Client.load` refuses (an `http://` API base,
         say). `cmd_logout` uses this as its fallback.
+
+        Implements :need:`REQ_TOKEN_REMOVABLE`.
         """
         path = default_config_path()
         existed = path.exists()
@@ -554,7 +543,7 @@ class Client:
                 _check(status, body, self.token)
             except TrackiwiError:
                 revoked = False
-        self.config_path.unlink(missing_ok=True)
+        self.forget_local_session()
         self.token = None
         self.api_base = None
         self.user_id = None

@@ -92,6 +92,20 @@ def test_logout_revokes_then_deletes_config():
     assert not default_config_path().exists()
 
 
+def test_logout_reports_a_config_it_cannot_delete(monkeypatch):
+    """`logout` deletes through `forget_local_session`, so a failed unlink is a
+    `TrackiwiError` naming the file, not a raw `OSError`."""
+    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
+    client = Client.load(opener=FakeOpener(FakeResponse(b"", status=204)))
+
+    def refuse(self, missing_ok=False):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr("pathlib.Path.unlink", refuse)
+    with pytest.raises(TrackiwiError, match="could not delete"):
+        client.logout()
+
+
 def test_logout_clears_local_state_even_if_revoke_fails():
     Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
     opener = FakeOpener(FakeResponse(b"", status=500))
