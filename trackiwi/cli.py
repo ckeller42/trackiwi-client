@@ -411,13 +411,17 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         trackiwi_error = error
         print(f"sync failed: {error}", file=sys.stderr)
     # Names are refreshed whether or not the sync got through: without them
-    # `mirror` refuses to push (it never writes an id as a placeholder name).
+    # `mirror` refuses to push. A cached tracker the API does not name (empty
+    # name, or gone from the account) gets a stable fallback, but only here,
+    # after `trackers()` answered: otherwise one such tracker would stall the
+    # mirror for every tracker.
     if client is not None and not isinstance(trackiwi_error, AuthError):
         try:
             trackers = client.trackers()
             names = {int(t["id"]): str(t.get("name") or "") for t in trackers if "id" in t}
             with Store() as store:
                 store.set_tracker_names({k: v for k, v in names.items() if v})
+                store.name_unnamed_trackers()
         except TrackiwiError as error:
             trackiwi_error = trackiwi_error or error
             print(f"tracker names not refreshed: {error}", file=sys.stderr)

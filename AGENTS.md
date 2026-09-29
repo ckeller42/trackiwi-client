@@ -116,11 +116,16 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   token), so don't swap it back to plain `urlopen`. `Client` refuses them too:
   both take the opener from `_http.no_redirect_opener`, and `client._check`
   raises on any 3xx (`REQ_NO_REDIRECTS`).
-- **`tracker_name` is only ever the real name.** `mirror()` stops before a
-  batch holding a row with no stored name; never reintroduce the id
-  placeholder on the push path (it splits a tracker's series,
-  `REQ_MIRROR_IDEMPOTENT`). Names are stored only by `ingest`; `influx push`
-  stays offline.
+- **`tracker_name` is only ever the *stored* name.** `mirror()` stops before
+  a batch holding a row with no stored name; never make a name up on the push
+  path (it splits a tracker's series, `REQ_MIRROR_IDEMPOTENT`). Names are
+  stored only by `ingest`; `influx push` stays offline. After `trackers()`
+  answered, `ingest` stores the real names and then gives every cached tracker
+  still without one the stable fallback `tracker <id>`
+  (`Store.name_unnamed_trackers`, `REQ_MIRROR_FALLBACK_NAME`) — an unnamed
+  tracker, or rows of one gone from the account, stalled the mirror for every
+  tracker. A real name may replace a fallback; a fallback never replaces a
+  stored name (`INSERT OR IGNORE`).
 - **Transports never leak raw OSError.** Both `client._request` and
   `influx._request` go through `_http.send`, the one place that converts
   `OSError` / `http.client.HTTPException` (timeouts, resets while *reading*,
