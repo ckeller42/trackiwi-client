@@ -1,7 +1,8 @@
 import json
+import urllib.request
 
 import pytest
-from conftest import FakeOpener, FakeResponse
+from conftest import FakeOpener, FakeResponse, RedirectingHTTP
 
 from trackiwi.client import Client, TrackiwiError
 
@@ -161,3 +162,31 @@ def test_non_numeric_count_header_is_ignored_not_fatal():
     c = client(FakeResponse(PAGE_1, headers={"trackiwi-position-count": "many"}), FakeResponse(b""))
     _, _, total = next(iter(c.sync()))
     assert total is None
+
+
+# --- Redirects are never followed (issue #15) --------------------------------
+
+
+def test_default_opener_never_follows_redirects():
+    """Real urllib, no network: the 302 is an error and the token goes nowhere else."""
+    c = Client(api_base="https://api.example.invalid", token="tok", user_id=42)
+    fake = RedirectingHTTP()
+    # The default opener is the bound `open` of a per-client `OpenerDirector`.
+    director = getattr(c.opener, "__self__", None)
+    assert isinstance(director, urllib.request.OpenerDirector), c.opener
+    director.add_handler(fake)
+    with pytest.raises(TrackiwiError, match="redirect"):
+        list(c.sync())
+    # One request only: the redirect target was never called.
+    assert fake.seen == [("POST", "https://api.example.invalid/api/v2/trackers/sync", "Bearer tok")]
+
+
+def test_a_redirect_is_not_read_as_no_more_data():
+    """An injected opener that hands back a 3xx with an empty body must not end the sync."""
+    c = client(FakeResponse(b"", status=302, headers={"Location": "http://other.example.invalid"}))
+    with pytest.raises(TrackiwiError, match="redirect"):
+        list(c.sync())
+
+
+def test_a_redirect_is_not_a_valid_session():
+    assert client(FakeResponse(b"", status=302)).session_ok() is False

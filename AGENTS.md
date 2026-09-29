@@ -113,16 +113,19 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   Acknowledged = 2xx, or a 4xx "beyond retention policy" partial write
   (warned on stderr). A 3xx never is: `InfluxWriter`'s default opener refuses
   redirects (a followed 302 to a login page was a false ack and forwarded the
-  token), so don't swap it back to plain `urlopen`.
+  token), so don't swap it back to plain `urlopen`. `Client` refuses them too:
+  both take the opener from `_http.no_redirect_opener`, and `client._check`
+  raises on any 3xx (`REQ_NO_REDIRECTS`).
 - **`tracker_name` is only ever the real name.** `mirror()` stops before a
   batch holding a row with no stored name; never reintroduce the id
   placeholder on the push path (it splits a tracker's series,
   `REQ_MIRROR_IDEMPOTENT`). Names are stored only by `ingest`; `influx push`
   stays offline.
 - **Transports never leak raw OSError.** Both `client._request` and
-  `influx._request` convert `OSError` / `http.client.HTTPException` (timeouts,
-  resets while *reading*, which urllib does not wrap in `URLError`) to
-  `TrackiwiError`; `ingest` relies on that to always reach the push.
+  `influx._request` go through `_http.send`, the one place that converts
+  `OSError` / `http.client.HTTPException` (timeouts, resets while *reading*,
+  which urllib does not wrap in `URLError`) to `TrackiwiError`; `ingest`
+  relies on that to always reach the push.
 - **The ingest Dockerfile COPYs an allowlist** (`pyproject.toml`, `LICENSE`,
   `trackiwi/`), never `.` — a COPY layer keeps what it copies. `.dockerignore`
   mirrors every private `.gitignore` pattern with `**/`; add both together.

@@ -7,20 +7,19 @@ SQLite or output formats.
 from __future__ import annotations
 
 import contextlib
-import http.client
 import json
 import math
 import os
 import platform
 import re
-import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
-from . import COLUMNS, __version__
+from . import COLUMNS, _http
 from . import AuthError as AuthError
 from . import TrackiwiError as TrackiwiError
 
@@ -201,7 +200,6 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int]:
 WEBSITE = "https://www.trackiwi.com"
 APP_NAME = "trackiwi"
 APP_VERSION = "0.0.0"
-USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
 DEFAULT_TIMEOUT = 30
 SYNC_TIMEOUT = 60
 
@@ -211,36 +209,6 @@ def default_config_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "trackiwi" / "config.json"
-
-
-def _header(headers: dict[str, str], name: str) -> str | None:
-    """Look up a response header case-insensitively.
-
-    `_request` returns `dict(response.headers)`, which loses the
-    case-insensitivity real HTTP headers have, so a lookup here must not
-    assume the server sent any particular casing.
-    """
-    lname = name.lower()
-    for key, value in headers.items():
-        if key.lower() == lname:
-            return value
-    return None
-
-
-def _read_error_body(error: urllib.error.HTTPError) -> bytes:
-    """Read an `HTTPError`'s body, tolerating a transport failure mid-read.
-
-    The status and headers are already known once urllib raises `HTTPError`;
-    letting a raw `TimeoutError`/`ConnectionResetError`/
-    `http.client.IncompleteRead` from `error.read()` escape would turn a
-    status `_check` already maps (401/412 -> `AuthError`) into an unmapped
-    error. An empty body still lets callers map the status; it is only the
-    detail text that is lost.
-    """
-    try:
-        return error.read()
-    except (OSError, http.client.HTTPException):
-        return b""
 
 
 #: Anything that looks like a bearer credential in server-controlled text.
@@ -269,11 +237,18 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling.
 
     Implements :need:`REQ_TOKEN_NEVER_LOGGED`: the interpolated body is redacted.
+    Implements :need:`REQ_NO_REDIRECTS`: a 3xx raises.
 
     `token`, when given, is this session's own token, scrubbed from the body
     in addition to the generic `Bearer ...` pattern. `_check` is module-level
     and so has no `self` to read it from.
     """
+    if 300 <= status < 400:
+        # Never success and never "no more data": see `_http.no_redirect_opener`.
+        raise TrackiwiError(
+            f"trackiwi answered HTTP {status}, a redirect; redirects are not followed",
+            status=status,
+        )
     if status < 400:
         return
     if status in (401, 412):
@@ -357,7 +332,7 @@ class Client:
         self.api_base = _require_https(api_base) if api_base else None
         self.token = token
         self.user_id = user_id
-        self.opener = opener or urllib.request.urlopen
+        self.opener = opener or _http.no_redirect_opener().open
         self.config_path = default_config_path()
 
     @property
@@ -463,7 +438,7 @@ class Client:
         body: dict[str, Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
         authed: bool = False,
-    ) -> tuple[int, dict[str, str], bytes]:
+    ) -> tuple[int, Message, bytes]:
         """Perform one HTTP request and return `(status, headers, body)`.
 
         Implements :need:`REQ_IGNORE_APP_COMMAND`: any `trackiwi-app-command`
@@ -473,7 +448,7 @@ class Client:
         """
         headers = {
             "Accept": "application/json",
-            "User-Agent": USER_AGENT,
+            "User-Agent": _http.USER_AGENT,
             "App-Name": APP_NAME,
             "App-Version": APP_VERSION,
             "User-Platform": "python",
@@ -488,22 +463,9 @@ class Client:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with self.opener(request, timeout=timeout) as response:
-                # The API may return a `trackiwi-app-command` header, which the
-                # official client executes. We deliberately ignore it.
-                return response.status, dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers), _read_error_body(error)
-        except urllib.error.URLError as error:
-            raise TrackiwiError(f"network error: {error.reason}") from error
-        except (OSError, http.client.HTTPException) as error:
-            # urllib wraps only the send in `URLError`; `getresponse()` and
-            # `read()` raise TimeoutError, ConnectionResetError,
-            # RemoteDisconnected or IncompleteRead unwrapped. Converted here so
-            # every caller (notably `ingest`, which must still push) sees a
-            # `TrackiwiError` instead of a traceback.
-            raise TrackiwiError(f"network error: {str(error) or type(error).__name__}") from error
+        # The API may return a `trackiwi-app-command` header, which the
+        # official client executes. We deliberately ignore it.
+        return _http.send(self.opener, request, timeout, "network error")
 
     def _api(
         self,
@@ -511,7 +473,7 @@ class Client:
         path: str,
         body: dict[str, Any] | None = None,
         timeout: int = DEFAULT_TIMEOUT,
-    ) -> tuple[int, dict[str, str], bytes]:
+    ) -> tuple[int, Message, bytes]:
         if not self.authenticated:
             raise AuthError("not logged in — run 'trackiwi login'")
         try:
@@ -571,7 +533,7 @@ class Client:
             status, _, _ = self._api("GET", "/api/v2/session")
         except AuthError:
             return False
-        return status < 400
+        return status < 300
 
     def logout(self) -> bool:
         """Revoke server-side first; a local delete alone leaves a live token.
@@ -748,7 +710,7 @@ class Client:
             )
             _check(status, body, self.token)
             if total is None:
-                raw_total = _header(headers, "trackiwi-position-count")
+                raw_total = headers.get("trackiwi-position-count")
                 if raw_total:
                     try:
                         total = int(raw_total)

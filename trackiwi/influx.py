@@ -13,21 +13,20 @@ from __future__ import annotations
 import base64
 import contextlib
 import gzip
-import http.client
 import json
 import os
 import re
 import sys
 import tomllib
-import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from email.message import Message
 from pathlib import Path
 from typing import Any, Protocol
 
-from . import TrackiwiError, __version__
+from . import TrackiwiError, _http
 from .lineprotocol import format_point
 from .store import Store
 
@@ -155,53 +154,8 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
 
 WRITE_TIMEOUT = 60
-USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
 _RETENTION_DROP = b"beyond retention policy"
 _AUTH_RE = re.compile(r"\b(Token|Bearer|Basic)\s+\S+", re.IGNORECASE)
-
-
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Refuse every redirect, so a 3xx comes back as an `HTTPError`.
-
-    Following one turned a login page behind an SSO proxy into a false write
-    acknowledgement, and urllib copies the ``Authorization`` header onto the
-    redirected request — to any host. See `InfluxWriter._request`.
-    """
-
-    def redirect_request(self, *args: Any, **kwargs: Any) -> None:
-        """Decline to build the redirected request."""
-        return None
-
-
-def _no_redirect_opener() -> urllib.request.OpenerDirector:
-    """A fresh opener that never follows redirects (one per writer)."""
-    return urllib.request.build_opener(_NoRedirect)
-
-
-def _header(headers: Mapping[str, str], name: str) -> str | None:
-    """Case-insensitive header lookup on a plain dict of headers."""
-    lname = name.lower()
-    for key, value in headers.items():
-        if key.lower() == lname:
-            return value
-    return None
-
-
-def _read_error_body(error: urllib.error.HTTPError) -> bytes:
-    """Read an `HTTPError`'s body, tolerating a transport failure mid-read.
-
-    The status and headers are already known once urllib raises `HTTPError`;
-    letting a raw `TimeoutError`/`ConnectionResetError`/
-    `http.client.IncompleteRead` from `error.read()` escape would turn a
-    status callers already map (401/403 -> rejected token, 404 -> missing
-    bucket, 500 -> write failed) into an unmapped, unrecognisable error. An
-    empty body still lets callers map the status; it is only the detail text
-    that is lost.
-    """
-    try:
-        return error.read()
-    except (OSError, http.client.HTTPException):
-        return b""
 
 
 class InfluxWriter:
@@ -219,7 +173,7 @@ class InfluxWriter:
 
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
         self.config = config
-        self.opener = opener or _no_redirect_opener().open
+        self.opener = opener or _http.no_redirect_opener().open
         self._version = config.version
 
     # -- transport -----------------------------------------------------------
@@ -248,10 +202,10 @@ class InfluxWriter:
         query: Mapping[str, str] | None = None,
         data: bytes | None = None,
         headers: Mapping[str, str] | None = None,
-    ) -> tuple[int, dict[str, str], bytes]:
+    ) -> tuple[int, Message, bytes]:
         """Perform one request and return ``(status, headers, body)``.
 
-        A 3xx raises: redirects are not followed (see `_NoRedirect`), and a
+        A 3xx raises: redirects are not followed (see `_http.no_redirect_opener`), and a
         redirect must never be mistaken for an answer. Every transport failure
         — including a timeout or reset while reading the response, which
         urllib does not wrap in `URLError` — becomes a `TrackiwiError`.
@@ -262,28 +216,21 @@ class InfluxWriter:
         request = urllib.request.Request(
             url,
             data=data,
-            headers={"User-Agent": USER_AGENT, **(headers or {})},
+            headers={"User-Agent": _http.USER_AGENT, **(headers or {})},
             method=method,
         )
         try:
-            with self.opener(request, timeout=WRITE_TIMEOUT) as response:
-                result = response.status, dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            result = error.code, dict(error.headers or {}), _read_error_body(error)
-        except urllib.error.URLError as error:
-            raise TrackiwiError(
-                f"cannot reach InfluxDB at {self.config.url}: {error.reason}"
-            ) from error
-        except (OSError, http.client.HTTPException) as error:
-            # Raised by getresponse()/read(): TimeoutError, ConnectionResetError,
-            # RemoteDisconnected, IncompleteRead. Nothing was acknowledged.
-            raise TrackiwiError(
-                f"cannot reach InfluxDB at {self.config.url}: "
-                f"{self._redact(str(error) or type(error).__name__)}"
-            ) from error
+            result = _http.send(
+                self.opener,
+                request,
+                WRITE_TIMEOUT,
+                f"cannot reach InfluxDB at {self.config.url}",
+            )
+        except TrackiwiError as error:
+            raise TrackiwiError(self._redact(str(error))) from error
         status, response_headers, _ = result
         if 300 <= status < 400:
-            location = self._redact(_header(response_headers, "Location") or "(no Location)")
+            location = self._redact(response_headers.get("Location") or "(no Location)")
             raise TrackiwiError(
                 f"InfluxDB at {self.config.url} answered HTTP {status}, a redirect to "
                 f"{location}; redirects are not followed — set url to the final address"
@@ -295,7 +242,7 @@ class InfluxWriter:
     def detect_version(self) -> int:
         """Read the major version from the ``X-Influxdb-Version`` header of ``/ping``."""
         _, headers, _ = self._request("GET", "/ping")
-        raw = (_header(headers, "X-Influxdb-Version") or "").strip()
+        raw = (headers.get("X-Influxdb-Version") or "").strip()
         text = raw.lstrip("vV")
         if text[:1] in ("1", "2"):
             return int(text[0])
