@@ -52,6 +52,8 @@
 - `trackiwi/influx.py`: the only module that talks to InfluxDB — target config,
   version detection, writes, `check`, and the resumable `mirror`. It and
   `client.py` never import each other.
+- `trackiwi/_http.py`: what both transports share — the opener that refuses
+  redirects, `USER_AGENT`, and `send` (urllib exceptions → `TrackiwiError`).
 - `deploy/`: Docker Compose stack (the `ingest` container), Grafana provisioning
   + portable Flux dashboard, systemd timer.
 

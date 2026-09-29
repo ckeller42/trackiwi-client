@@ -55,6 +55,15 @@ Verifying tests
    ``tests/test_client_auth.py::test_a_plain_http_api_base_is_rejected``,
    ``tests/test_client_auth.py::test_a_saved_config_with_an_http_api_base_is_rejected``
 
+.. test:: A redirect is an error and the token never follows it
+   :id: TEST_NO_REDIRECTS
+   :verifies: REQ_NO_REDIRECTS
+
+   ``tests/test_client_sync.py::test_default_opener_never_follows_redirects``,
+   ``tests/test_client_sync.py::test_a_redirect_is_not_read_as_no_more_data``,
+   ``tests/test_client_sync.py::test_a_redirect_is_not_a_valid_session``,
+   ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects``
+
 .. test:: The app-command response header is ignored
    :id: TEST_IGNORE_APP_COMMAND
    :verifies: REQ_IGNORE_APP_COMMAND

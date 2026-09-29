@@ -9,11 +9,10 @@ import json
 import urllib.error
 import urllib.parse
 import urllib.request
-import urllib.response
 from typing import Any
 
 import pytest
-from conftest import FakeOpener, FakeResponse
+from conftest import FakeOpener, FakeResponse, RedirectingHTTP
 
 from trackiwi import TrackiwiError
 from trackiwi.influx import InfluxConfig, InfluxWriter
@@ -281,37 +280,6 @@ def test_a_redirect_on_check_is_an_error():
         InfluxWriter(_cfg(), opener=opener).check()
 
 
-class _Response(urllib.response.addinfourl):
-    """`addinfourl` plus the `msg` reason phrase `HTTPErrorProcessor` reads."""
-
-    def __init__(self, body, headers, url, code):
-        super().__init__(io.BytesIO(body), headers, url, code)
-        self.msg = "Found" if code == 302 else "OK"
-
-
-class _RedirectingHTTP(urllib.request.BaseHandler):
-    """Offline stand-in for a proxy: 302 to a login page, which then answers 200.
-
-    `handler_order` below the stock `HTTPHandler` (500) makes the opener ask
-    this handler first, so no socket is ever opened. It records what reached
-    it, which is exactly what a real server would have seen.
-    """
-
-    handler_order = 100
-
-    def __init__(self):
-        self.seen = []
-
-    def http_open(self, req):
-        self.seen.append((req.get_method(), req.full_url, req.get_header("Authorization")))
-        headers = http.client.HTTPMessage()
-        code = 200
-        if len(self.seen) == 1:
-            headers["Location"] = "http://sso.example.invalid/login"
-            code = 302
-        return _Response(b"<html/>", headers, req.full_url, code)
-
-
 def _default_director(writer):
     # The default opener is the bound `open` of a per-writer `OpenerDirector`.
     director = getattr(writer.opener, "__self__", None)
@@ -322,7 +290,7 @@ def _default_director(writer):
 def test_default_opener_never_follows_redirects():
     """Real urllib, no network: the 302 surfaces as an error and nothing follows it."""
     writer = InfluxWriter(_cfg())
-    fake = _RedirectingHTTP()
+    fake = RedirectingHTTP()
     _default_director(writer).add_handler(fake)
     with pytest.raises(TrackiwiError, match="redirect"):
         writer.write(["m f=1.0 1"])

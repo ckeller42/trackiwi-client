@@ -62,6 +62,14 @@ Authentication & transport
    response, ``--api-base``, or the config file); an ``http://`` base would send
    the bearer token in cleartext. (Design spec §7.3.)
 
+.. req:: Redirects are never followed
+   :id: REQ_NO_REDIRECTS
+   :tags: auth, security
+
+   No request follows an HTTP redirect. urllib copies the ``Authorization``
+   header onto a redirected request, to any host and any scheme, so a 3xx is
+   an error: never success, and never "no more data".
+
 .. req:: The server command header is ignored
    :id: REQ_IGNORE_APP_COMMAND
    :tags: safety, security
