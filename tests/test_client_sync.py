@@ -8,6 +8,9 @@ from trackiwi.client import Client, TrackiwiError
 
 PAGE_1 = b"1,7,1758000000,120,31.0,-41.0,12,0.0,0,0,-71,9,98,4120\n"
 PAGE_2 = b"2,7,1758000060,120,31.1,-41.1,12,0.0,0,0,-71,9,98,4120\n"
+MALFORMED_2 = b"2,7,1758000060,120,nan,-41.1,12,0.0,0,0,-71,9,98,4120\n"
+MALFORMED_3 = b"3,7,1758000120,120,31.2\n"
+PAGE_4 = b"4,7,1758000180,120,31.3,-41.3,12,0.0,0,0,-71,9,98,4120\n"
 
 
 @pytest.fixture(autouse=True)
@@ -90,9 +93,40 @@ def test_trackers_raises_on_an_unexpected_shape():
         c.trackers()
 
 
+def _offsets(opener):
+    return [json.loads(call.data) for call in opener.calls]
+
+
+def test_a_malformed_newest_row_is_skipped_and_the_offset_moves_past_it():
+    """Issue #18: the offset used to stop at the last *parsed* id, so the
+    malformed row came back alone on the next page and made it "unparseable"."""
+    opener = FakeOpener(FakeResponse(PAGE_1 + MALFORMED_2), FakeResponse(b""))
+    c = Client(api_base="https://api.example.invalid", token="tok", opener=opener)
+    batches = list(c.sync())
+    assert [(len(rows), skipped) for rows, skipped, _ in batches] == [(1, 1)]
+    assert _offsets(opener) == [{"initial_sync": True}, {"offset": 2}]
+
+
+def test_the_next_run_resumes_past_a_malformed_newest_row():
+    """The cache holds id 1, so the next run asks from 1 and gets the bad row alone."""
+    opener = FakeOpener(FakeResponse(MALFORMED_2), FakeResponse(b""))
+    c = Client(api_base="https://api.example.invalid", token="tok", opener=opener)
+    assert list(c.sync(offset=1)) == [([], 1, None)]
+    assert _offsets(opener) == [{"offset": 1}, {"offset": 2}]
+
+
+def test_a_page_of_only_malformed_rows_advances_by_their_ids():
+    opener = FakeOpener(FakeResponse(MALFORMED_2 + MALFORMED_3), FakeResponse(PAGE_4))
+    opener.responses.append(FakeResponse(b""))
+    c = Client(api_base="https://api.example.invalid", token="tok", opener=opener)
+    batches = list(c.sync(offset=1))
+    assert [(len(rows), skipped) for rows, skipped, _ in batches] == [(0, 2), (1, 0)]
+    assert _offsets(opener) == [{"offset": 1}, {"offset": 3}, {"offset": 4}]
+
+
 def test_all_malformed_page_raises_instead_of_stopping_silently():
     # Without a parseable id there is no way to compute the next offset, so
-    # a page that is not empty but yields zero rows must fail loudly rather
+    # a page that is not empty but yields no id at all must fail loudly rather
     # than look like end-of-data (which would strand the sync forever).
     c = client(FakeResponse(b"broken,row\n"), FakeResponse(b""))
     with pytest.raises(TrackiwiError):

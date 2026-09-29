@@ -224,6 +224,18 @@ def test_sync_writes_batches_and_reports_counts(capsys, monkeypatch):
     assert "2 new positions, 2 cached in total" in capsys.readouterr().out
 
 
+def test_sync_with_only_malformed_rows_reports_them_and_succeeds(capsys, monkeypatch):
+    """Issue #18: a page may carry no usable row at all and still be progress."""
+    seed_cache()
+    monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client([([], 1, None)]))
+
+    assert main(["sync"]) == 0
+
+    captured = capsys.readouterr()
+    assert "skipped 1 malformed rows" in captured.err
+    assert "0 new positions, 2 cached in total" in captured.out
+
+
 def test_sync_does_not_report_refetched_rows_as_new(capsys, monkeypatch):
     seed_cache()
     batch = ([row(1), row(2, fix_at=1758000060)], 0, 2)
