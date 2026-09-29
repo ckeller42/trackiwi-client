@@ -557,6 +557,28 @@ def test_logout_with_an_http_api_base_still_removes_the_credentials(capsys):
     assert "Traceback" not in err
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"api_base": "https://api.example.invalid", "token": "live-to',
+        '["live-token"]',
+        '{"api_base": 5, "token": "live-token", "user_id": 1}',
+    ],
+    ids=["truncated-json", "non-dict", "non-string-api-base"],
+)
+def test_logout_with_an_unloadable_config_still_removes_the_credentials(raw, capsys):
+    """Only the `http://` case fell back to deleting; every other config that
+    `Client.load()` refuses left the token on disk and exited 1 (issue #17)."""
+    path = _write_raw_config(raw)
+    assert main(["logout"]) == 0
+    err = capsys.readouterr().err
+    assert not path.exists()
+    assert "may still be valid" in err.lower()
+    assert "trackiwi app" in err.lower()
+    assert "live-to" not in err
+    assert "Traceback" not in err
+
+
 # --- N-3: a partial sync must not report success ---
 
 

@@ -34,20 +34,18 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   and `AuthError` live in `trackiwi/__init__.py` with the package's other
   shared contracts (`__version__`, `COLUMNS`), so neither `client.py` nor
   `store.py` imports the other to reach them.
-  `client.InsecureApiBaseError` is a private `TrackiwiError` subclass, not a
-  third member of spec §8's taxonomy: same message, same exit code, not
-  exported from `__init__.py`. It exists so `cmd_logout` can tell "the stored
-  API base cannot carry a request" apart from every other `TrackiwiError`.
 - **Validate config *values*, not only the document.** `Client.load` checks
   `isinstance(data, dict)` *and* that `api_base` is a string or `None`: a
   non-string value reached `_require_https`'s `.lower()` and escaped `main()`
   as an `AttributeError`, one line past the check meant to prevent that.
 - **A stored token must always be removable.** `logout` is the only revocation
   path (spec §7.3), so it must not be blockable by the config file's own
-  contents. When the stored `api_base` fails validation, `cmd_logout` falls
-  back to `Client.forget_local_session()` and warns on stderr. It does *not*
-  revoke over that base: sending the token in cleartext is exactly what
-  `_require_https` prevents.
+  contents. On *any* `TrackiwiError` from `Client.load()` (non-https
+  `api_base`, truncated JSON, wrong type), `cmd_logout` falls back to
+  `Client.forget_local_session()` and warns on stderr
+  (`REQ_TOKEN_REMOVABLE`). It does *not* revoke over a non-https base:
+  sending the token in cleartext is exactly what `_require_https` prevents.
+  `Client.logout()` deletes through the same `forget_local_session()`.
 - **`BrokenPipeError` means success only where the payload is written.** It is
   caught in `cmd_export` around `sys.stdout.write` (`export | head` is not an
   error); `main()` catches it too but exits **1**, because `cmd_sync` writes

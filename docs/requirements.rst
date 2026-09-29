@@ -193,6 +193,15 @@ Export
    when it cannot, still removes the local credentials and warns that the token
    may remain valid. (Design spec §7.3.)
 
+.. req:: A stored token is always removable
+   :id: REQ_TOKEN_REMOVABLE
+   :tags: auth, security
+
+   ``logout`` removes the local credentials whatever the config file holds: a
+   file that cannot be loaded (truncated JSON, a non-object document, a
+   non-string or non-https ``api_base``) is deleted all the same, with a
+   warning that the token may remain valid. (Design spec §7.3.)
+
 .. req:: Positions are written to InfluxDB in natural units
    :id: REQ_LINEPROTOCOL_UNITS
    :tags: influx, data
