@@ -250,6 +250,19 @@ class Store:
         )
         self.conn.commit()
 
+    def name_unnamed_trackers(self) -> None:
+        """Give every cached tracker that has no stored name ``tracker <id>``.
+
+        Implements :need:`REQ_MIRROR_FALLBACK_NAME`. ``INSERT OR IGNORE`` is
+        the whole rule: a stored name, real or fallback, is never overwritten
+        here, while `set_tracker_names` replaces a fallback with a real name.
+        """
+        self.conn.execute(
+            "INSERT OR IGNORE INTO tracker_names (tracker_id, name) "
+            "SELECT DISTINCT tracker_id, 'tracker ' || tracker_id FROM positions"
+        )
+        self.conn.commit()
+
     def tracker_names(self) -> dict[int, str]:
         """Return every stored tracker id → display name."""
         return {

@@ -253,6 +253,17 @@ Verifying tests
    ``tests/test_cli_influx.py::test_ingest_whose_name_refresh_fails_pushes_no_id_tags``,
    ``tests/test_cli_influx.py::test_ingest_refreshes_names_even_when_sync_fails``
 
+.. test:: Unnamed and removed trackers get a fallback name
+   :id: TEST_MIRROR_FALLBACK_NAME
+   :verifies: REQ_MIRROR_FALLBACK_NAME
+
+   ``tests/test_store_mirror.py::test_a_cached_tracker_without_a_name_gets_the_fallback``,
+   ``tests/test_store_mirror.py::test_a_fallback_never_replaces_a_stored_name_but_a_real_name_replaces_it``,
+   ``tests/test_cli_influx.py::test_ingest_gives_a_tracker_the_api_does_not_name_a_fallback``,
+   ``tests/test_cli_influx.py::test_ingest_rows_of_a_tracker_gone_from_the_account_do_not_block_the_others``,
+   ``tests/test_cli_influx.py::test_ingest_replaces_a_fallback_with_the_real_name_once_there_is_one``,
+   ``tests/test_cli_influx.py::test_ingest_never_replaces_a_real_name_with_the_fallback``
+
 .. test:: Deployment templates are placeholder-only and complete
    :id: TEST_PORTABLE_CONFIG
    :verifies: REQ_PORTABLE_CONFIG

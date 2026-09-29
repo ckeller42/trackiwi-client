@@ -38,6 +38,25 @@ def test_tracker_names_round_trip_and_update(tmp_path):
         assert store.tracker_names() == {7: "Van", 8: "Car"}
 
 
+def test_a_cached_tracker_without_a_name_gets_the_fallback(tmp_path):
+    """REQ_MIRROR_FALLBACK_NAME: only trackers that have rows and no name are touched."""
+    with Store(tmp_path / "p.db") as store:
+        store.upsert([_row(1), _row(2, tracker=8)])
+        store.set_tracker_names({7: "Bus", 9: "Car"})
+        store.name_unnamed_trackers()
+        assert store.tracker_names() == {7: "Bus", 8: "tracker 8", 9: "Car"}
+
+
+def test_a_fallback_never_replaces_a_stored_name_but_a_real_name_replaces_it(tmp_path):
+    with Store(tmp_path / "p.db") as store:
+        store.upsert([_row(1, tracker=8)])
+        store.name_unnamed_trackers()
+        store.set_tracker_names({8: "Van"})
+        assert store.tracker_names() == {8: "Van"}
+        store.name_unnamed_trackers()
+        assert store.tracker_names() == {8: "Van"}
+
+
 def test_existing_cache_gains_the_new_tables(tmp_path):
     """A cache created before this feature (no new tables) upgrades on open, keeping its rows."""
     import sqlite3

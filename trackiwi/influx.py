@@ -390,9 +390,12 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
     :need:`REQ_MIRROR_IDEMPOTENT`: a row always becomes the same point (same
     tags, same timestamp), which InfluxDB overwrites rather than duplicates,
     so re-sending is always safe. That is why the ``tracker_name`` tag is only
-    ever the real name: a batch holding a row whose tracker has no stored name
-    is not sent at all (the mirror stops before it with a `TrackiwiError`),
-    because a placeholder tag would later split that tracker into two series.
+    ever the stored name: a batch holding a row whose tracker has no stored
+    name is not sent at all (the mirror stops before it with a
+    `TrackiwiError`), because a tag made up here would later split that
+    tracker into two series. `ingest` stores a name for every cached tracker
+    (:need:`REQ_MIRROR_FALLBACK_NAME`), so this only happens before the first
+    name refresh that succeeds.
     Returns the number of points sent; the first failed batch re-raises its
     `TrackiwiError`.
     """

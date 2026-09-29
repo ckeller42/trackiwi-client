@@ -265,6 +265,16 @@ Mirror
    timestamp — so re-sending (including a full backfill) overwrites rather
    than duplicates. (Influx spec §4.)
 
+.. req:: A tracker without a name never stalls the mirror
+   :id: REQ_MIRROR_FALLBACK_NAME
+   :tags: integrity, influx
+
+   After a successful tracker listing, ``ingest`` stores a name for every
+   tracker that has cached rows: the real name, or else the stable fallback
+   ``tracker <id>`` when the API gives none or no longer lists the tracker. A
+   real name replaces a fallback; a fallback never replaces a stored name.
+   (Issue #16.)
+
 .. req:: Committed deployment templates carry no deployment's specifics
    :id: REQ_PORTABLE_CONFIG
    :tags: privacy, portability, influx

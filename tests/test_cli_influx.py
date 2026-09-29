@@ -8,8 +8,8 @@ from trackiwi.client import Client
 from trackiwi.store import Store
 
 
-def _row(pid):
-    return (pid, 7, 1700000000 + pid, 1, 31.0, -41.0, 12, 0.0, 90, 150, 5, 9, 99, 1287)
+def _row(pid, tracker=7):
+    return (pid, tracker, 1700000000 + pid, 1, 31.0, -41.0, 12, 0.0, 90, 150, 5, 9, 99, 1287)
 
 
 def _cache_rows(*rows, names=None):
@@ -178,6 +178,51 @@ def test_ingest_whose_name_refresh_fails_pushes_no_id_tags(env, monkeypatch, cap
     )
     assert cli.main(["ingest"]) == 1
     assert FakeWriter.instances[0].batches == []
+
+
+# --- A tracker without a name must not stall the mirror (issue #16) ---------
+
+
+@pytest.mark.parametrize("unnamed", [{"id": 8, "name": ""}, {"id": 8, "name": None}, {"id": 8}])
+def test_ingest_gives_a_tracker_the_api_does_not_name_a_fallback(env, monkeypatch, unnamed):
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(
+            batches=[([_row(1), _row(2, tracker=8), _row(3)], 0, 3)],
+            trackers=[{"id": 7, "name": "Bus"}, unnamed],
+        ),
+    )
+    assert cli.main(["ingest"]) == 0
+    lines = FakeWriter.instances[0].batches[0]
+    assert ",tracker_name=Bus " in lines[0]
+    assert ",tracker_id=8,tracker_name=tracker\\ 8 " in lines[1]
+    assert ",tracker_name=Bus " in lines[2]
+
+
+def test_ingest_rows_of_a_tracker_gone_from_the_account_do_not_block_the_others(env, monkeypatch):
+    _cache_rows(_row(1), _row(2, tracker=8), _row(3))
+    monkeypatch.setattr("trackiwi.cli.Client", _stub_client(trackers=[{"id": 7, "name": "Bus"}]))
+    assert cli.main(["ingest"]) == 0
+    assert len(FakeWriter.instances[0].batches[0]) == 3
+    with Store() as store:
+        assert store.tracker_names() == {7: "Bus", 8: "tracker 8"}
+        assert store.mirror_position("k") == 3
+
+
+def test_ingest_replaces_a_fallback_with_the_real_name_once_there_is_one(env, monkeypatch):
+    _cache_rows(_row(1, tracker=8), names={8: "tracker 8"})
+    monkeypatch.setattr("trackiwi.cli.Client", _stub_client(trackers=[{"id": 8, "name": "Van"}]))
+    assert cli.main(["ingest"]) == 0
+    assert ",tracker_name=Van " in FakeWriter.instances[0].batches[0][0]
+
+
+def test_ingest_never_replaces_a_real_name_with_the_fallback(env, monkeypatch):
+    _cache_rows(_row(1, tracker=8), names={8: "Van"})
+    monkeypatch.setattr("trackiwi.cli.Client", _stub_client(trackers=[{"id": 8, "name": ""}]))
+    assert cli.main(["ingest"]) == 0
+    assert ",tracker_name=Van " in FakeWriter.instances[0].batches[0][0]
+    with Store() as store:
+        assert store.tracker_names() == {8: "Van"}
 
 
 # --- ingest reports each failure separately (final review M-ingest) ---------
