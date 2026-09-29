@@ -9,14 +9,14 @@ FIXTURE = Path(__file__).parent / "fixtures" / "synthetic-positions.csv"
 
 
 def test_parses_all_rows_from_fixture():
-    rows, skipped = parse_positions(FIXTURE.read_text(encoding="utf-8"))
+    rows, skipped, _ = parse_positions(FIXTURE.read_text(encoding="utf-8"))
     assert len(rows) == 3
     assert skipped == 0
     assert len(rows[0]) == len(COLUMNS)
 
 
 def test_types_are_coerced():
-    rows, _ = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, _, _ = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
     row = dict(zip(COLUMNS, rows[0], strict=True))
     assert row["id"] == 1001
     assert row["latitude"] == 31.5
@@ -25,7 +25,7 @@ def test_types_are_coerced():
 
 
 def test_empty_optional_field_becomes_none():
-    rows, _ = parse_positions("1001,7,1758000000,,31.5,-41.5,,,,,,,,\n")
+    rows, _, _ = parse_positions("1001,7,1758000000,,31.5,-41.5,,,,,,,,\n")
     row = dict(zip(COLUMNS, rows[0], strict=True))
     assert row["fix_timezone"] is None
     assert row["voltage"] is None
@@ -33,25 +33,25 @@ def test_empty_optional_field_becomes_none():
 
 def test_short_row_is_skipped_not_fatal():
     text = "1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n1002,7,broken\n"
-    rows, skipped = parse_positions(text)
+    rows, skipped, _ = parse_positions(text)
     assert len(rows) == 1
     assert skipped == 1
 
 
 def test_overlong_row_is_skipped():
-    rows, skipped = parse_positions("1," * 20 + "\n")
+    rows, skipped, _ = parse_positions("1," * 20 + "\n")
     assert rows == []
     assert skipped == 1
 
 
 def test_row_missing_required_field_is_skipped():
-    rows, skipped = parse_positions("1001,7,1758000000,120,,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions("1001,7,1758000000,120,,-41.5,12,0.0,0,0,-71,9,98,4120\n")
     assert rows == []
     assert skipped == 1
 
 
 def test_non_numeric_field_is_skipped():
-    rows, skipped = parse_positions("x,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions("x,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
     assert rows == []
     assert skipped == 1
 
@@ -65,7 +65,7 @@ def test_non_finite_coordinate_is_skipped(value):
     schema-invalid GPX and syntactically invalid JSON, while `nan` becomes
     NULL on insert and wedges the sync page forever.
     """
-    rows, skipped = parse_positions(
+    rows, skipped, _ = parse_positions(
         f"1001,7,1758000000,120,{value},-41.5,12,0.0,0,0,-71,9,98,4120\n"
     )
     assert rows == []
@@ -73,7 +73,9 @@ def test_non_finite_coordinate_is_skipped(value):
 
 
 def test_non_finite_speed_is_skipped():
-    rows, skipped = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,inf,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions(
+        "1001,7,1758000000,120,31.5,-41.5,12,inf,0,0,-71,9,98,4120\n"
+    )
     assert rows == []
     assert skipped == 1
 
@@ -84,20 +86,44 @@ def test_fix_at_outside_the_datetime_range_is_skipped(fix_at):
     timestamp stays ~1000x too large. Without a range check the store accepts
     it and every later export dies on `datetime.fromtimestamp` — not just the
     export of that row, but of any date range that includes it."""
-    rows, skipped = parse_positions(f"1001,7,{fix_at},120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions(f"1001,7,{fix_at},120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
     assert rows == []
     assert skipped == 1
 
 
 def test_plausible_fix_at_is_still_accepted():
-    rows, skipped = parse_positions("1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions(
+        "1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n"
+    )
     assert len(rows) == 1
     assert skipped == 0
 
 
+def test_the_highest_id_counts_malformed_rows_too():
+    """REQ_SYNC_PAST_MALFORMED: a skipped row still tells `sync` how far the page went."""
+    text = (
+        "1001,7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n"
+        "1003,7,1758000120,120,nan,-41.5,12,0.0,0,0,-71,9,98,4120\n"
+        "1002,7,broken\n"
+    )
+    rows, skipped, last_id = parse_positions(text)
+    assert [row[0] for row in rows] == [1001]
+    assert skipped == 2
+    assert last_id == 1003
+
+
+def test_a_row_without_a_readable_id_reports_no_highest_id():
+    assert parse_positions("broken,row\n") == ([], 1, None)
+    assert parse_positions(",7,1758000000,120,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n") == (
+        [],
+        1,
+        None,
+    )
+
+
 def test_blank_body_yields_nothing():
-    assert parse_positions("") == ([], 0)
-    assert parse_positions("\n\n") == ([], 0)
+    assert parse_positions("") == ([], 0, None)
+    assert parse_positions("\n\n") == ([], 0, None)
 
 
 def test_milliseconds_are_normalised_to_seconds():
@@ -106,7 +132,7 @@ def test_milliseconds_are_normalised_to_seconds():
 
 
 def test_fix_at_is_normalised_during_parse():
-    rows, _ = parse_positions("1,7,1758000000123,120,31.5,-41.5,1,0.0,0,0,-71,9,98,4120\n")
+    rows, _, _ = parse_positions("1,7,1758000000123,120,31.5,-41.5,1,0.0,0,0,-71,9,98,4120\n")
     assert dict(zip(COLUMNS, rows[0], strict=True))["fix_at"] == 1758000000
 
 

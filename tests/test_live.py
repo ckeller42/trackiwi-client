@@ -46,7 +46,8 @@ def test_live_contract():
     except StopIteration:
         pytest.skip("no positions recorded for this account yet")
 
-    assert rows and len(rows[0]) == len(COLUMNS)
+    assert rows, f"first sync page had no usable row ({skipped} skipped)"
+    assert len(rows[0]) == len(COLUMNS)
     sample = dict(zip(COLUMNS, rows[0], strict=True))
 
     print("position-count header:", total)

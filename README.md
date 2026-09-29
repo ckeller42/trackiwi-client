@@ -194,11 +194,12 @@ range. `sync` reports the count on stderr.
 `sync` is incremental and offset-based, so if it is interrupted, just run it
 again — it resumes from the highest position already stored. There is no
 retry logic precisely because re-running is the retry. Two things make it
-stop loudly instead of quietly limping on: a page whose rows are all
-unparseable, and a server offset that fails to advance past the one just
-requested. Either way, everything fetched before the failure is already
-saved, so re-running continues from where it stopped — nothing is lost or
-re-fetched from scratch.
+stop loudly instead of quietly limping on: a page on which not even an id
+is readable, and a server offset that fails to advance past the one just
+requested. A malformed row is not one of them — it is skipped, counted and
+passed, even when it is the newest row. Either way, everything fetched before
+the failure is already saved, so re-running continues from where it stopped —
+nothing is lost or re-fetched from scratch.
 
 If you would rather not type your password, log in elsewhere and reuse the
 session (both flags are required together — supplying only one is an error).

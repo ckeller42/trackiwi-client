@@ -102,9 +102,18 @@ Sync
    :id: REQ_SYNC_FAIL_LOUD
    :tags: sync
 
-   An all-unparseable page, or a page whose highest id does not exceed the
-   requested offset, raises rather than silently ending or looping forever.
-   (Design spec §8.)
+   A page on which no line has a readable id, or a page whose highest id does
+   not exceed the requested offset, raises rather than silently ending or
+   looping forever. (Design spec §8.)
+
+.. req:: Sync moves past malformed rows
+   :id: REQ_SYNC_PAST_MALFORMED
+   :tags: sync, parsing
+
+   The next offset is the highest id on the page, counting skipped rows whose
+   first field is an integer. A malformed row at the newest end of the data,
+   or a page of nothing but malformed rows, is skipped, counted and passed;
+   it never makes ``sync`` fail. (Issue #18.)
 
 Parsing
 -------

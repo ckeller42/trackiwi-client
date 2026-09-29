@@ -199,7 +199,9 @@ def test_fix_timezone_stays_an_integer_from_parse_through_store_to_csv(tmp_path)
     from trackiwi.client import parse_positions
     from trackiwi.store import Store
 
-    parsed, skipped = parse_positions("1001,7,1758000000,1,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    parsed, skipped, _ = parse_positions(
+        "1001,7,1758000000,1,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n"
+    )
     assert skipped == 0
     fields = dict(zip(COLUMNS, parsed[0], strict=True))
     assert fields["fix_timezone"] == 1
@@ -233,7 +235,9 @@ def test_a_zone_name_in_the_fix_timezone_column_is_skipped_as_malformed():
     `_coerce` cannot quietly start accepting a shape the server never emits."""
     from trackiwi.client import parse_positions
 
-    rows, skipped = parse_positions("1001,7,1758000000,UTC,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, skipped, _ = parse_positions(
+        "1001,7,1758000000,UTC,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n"
+    )
     assert rows == []
     assert skipped == 1
 
@@ -242,5 +246,5 @@ def test_an_absent_fix_timezone_is_still_allowed():
     """It is a nullable column: an empty field must stay `None`, not become 0."""
     from trackiwi.client import parse_positions
 
-    rows, _ = parse_positions("1001,7,1758000000,,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
+    rows, _, _ = parse_positions("1001,7,1758000000,,31.5,-41.5,12,0.0,0,0,-71,9,98,4120\n")
     assert dict(zip(COLUMNS, rows[0], strict=True))["fix_timezone"] is None

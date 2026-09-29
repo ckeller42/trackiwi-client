@@ -140,27 +140,33 @@ def _coerce(column: str, raw: str) -> float | int | None:
     return value
 
 
-def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int]:
+def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int, int | None]:
     """Parse the sync endpoint's CSV body.
 
-    Implements :need:`REQ_MALFORMED_SKIP` and :need:`REQ_FIX_AT_SECONDS`.
+    Implements :need:`REQ_MALFORMED_SKIP`, :need:`REQ_FIX_AT_SECONDS` and
+    :need:`REQ_SYNC_PAST_MALFORMED`.
 
-    Returns `(rows, skipped)`. Rows are tuples in :data:`trackiwi.COLUMNS`
-    order with `fix_at` normalised to epoch seconds. Malformed rows are
-    skipped and counted rather than aborting the batch, matching the vendor
-    client's behaviour: one bad row must not discard a whole sync page.
+    Returns `(rows, skipped, last_id)`. Rows are tuples in
+    :data:`trackiwi.COLUMNS` order with `fix_at` normalised to epoch seconds.
+    Malformed rows are skipped and counted rather than aborting the batch,
+    matching the vendor client's behaviour: one bad row must not discard a
+    whole sync page. `last_id` is the highest id on any line whose first field
+    is an integer, skipped lines included, or ``None`` when there is none.
 
     >>> body = "1,7,1700000000,1,31.0,-41.0,12,0.0,0,0,-71,9,98,4120\\n"
-    >>> rows, skipped = parse_positions(body)
-    >>> skipped
-    0
+    >>> rows, skipped, last_id = parse_positions(body)
+    >>> skipped, last_id
+    (0, 1)
     >>> rows[0][:3]
     (1, 7, 1700000000)
+    >>> parse_positions("2,7,broken\\n")
+    ([], 1, 2)
     >>> parse_positions("broken,row\\n")
-    ([], 1)
+    ([], 1, None)
     """
     rows: list[tuple[Any, ...]] = []
     skipped = 0
+    ids: list[int] = []
     for line in text.splitlines():
         line = line.strip()
         if not line:
@@ -171,6 +177,10 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int]:
         # does use `csv.writer` — an export is written for other tools, not to
         # be re-read here.
         fields = line.split(",")
+        # Read before the row is judged: `sync` has to move past a malformed
+        # row as well, or it is fetched and skipped again on every page.
+        with contextlib.suppress(ValueError):
+            ids.append(int(fields[0]))
         if len(fields) != len(COLUMNS):
             skipped += 1
             continue
@@ -194,7 +204,7 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int]:
             continue
         values["fix_at"] = fix_at
         rows.append(tuple(values[c] for c in COLUMNS))
-    return rows, skipped
+    return rows, skipped, max(ids, default=None)
 
 
 WEBSITE = "https://www.trackiwi.com"
@@ -681,21 +691,25 @@ class Client:
     ) -> Iterator[tuple[list[tuple[Any, ...]], int, int | None]]:
         """Yield `(rows, skipped, total)` batches until the server runs dry.
 
-        Implements :need:`REQ_SYNC_RESUME`, :need:`REQ_SYNC_OFFSET_EXCLUSIVE`
-        and :need:`REQ_SYNC_FAIL_LOUD`.
+        Implements :need:`REQ_SYNC_RESUME`, :need:`REQ_SYNC_OFFSET_EXCLUSIVE`,
+        :need:`REQ_SYNC_FAIL_LOUD` and :need:`REQ_SYNC_PAST_MALFORMED`.
 
         Offset-based and therefore resumable: if this fails part-way, simply
         running it again continues from the highest id already stored. That is
         why there is no retry logic anywhere in this client.
 
+        The offset advances to the highest id on the page, malformed rows
+        included, so `rows` can be empty in a batch that only skipped: a
+        malformed row at the newest end of the data is passed, not re-fetched
+        until a newer good row happens to follow it.
+
         Two failure shapes are distinguished from ordinary end-of-data:
 
-        - A page that parses to zero rows but skipped one or more malformed
-          ones is not "no more data" — it is a parse failure. Continuing
-          would leave the stored offset stuck forever, silently re-fetching
-          and re-failing on the same page, so this raises instead. Only a
-          page with nothing to skip either (a genuinely empty response) ends
-          the loop normally.
+        - A page on which no line has a readable id but one or more were
+          skipped is not "no more data" — it is a parse failure with no next
+          offset to go to. Continuing would silently re-fetch and re-fail on
+          the same page, so this raises instead. Only a page with nothing to
+          skip either (a genuinely empty response) ends the loop normally.
         - If the server ever returns a page whose highest id does not exceed
           the offset just requested (a duplicate, a stale cache, an
           off-by-one on their side), advancing by that id would spin
@@ -716,16 +730,16 @@ class Client:
                         total = int(raw_total)
                     except ValueError:
                         total = None
-            rows, skipped = parse_positions(body.decode("utf-8", "replace"))
-            if not rows:
+            rows, skipped, last_id = parse_positions(body.decode("utf-8", "replace"))
+            if last_id is None:
                 if skipped:
                     raise TrackiwiError(
                         f"sync page at offset {requested_offset!r} was unparseable "
-                        f"({skipped} row(s) skipped, none usable)"
+                        f"({skipped} row(s) skipped, none with a readable id)"
                     )
                 return
             yield rows, skipped, total
-            offset = max(row[0] for row in rows)
+            offset = last_id
             if requested_offset is not None and offset <= requested_offset:
                 raise TrackiwiError(
                     f"trackiwi returned no new records past offset {requested_offset}"

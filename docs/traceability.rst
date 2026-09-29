@@ -90,6 +90,17 @@ Verifying tests
    ``tests/test_client_sync.py::test_all_malformed_page_raises_instead_of_stopping_silently``,
    ``tests/test_client_sync.py::test_non_advancing_offset_raises_instead_of_looping_forever``
 
+.. test:: A malformed row never stops the sync
+   :id: TEST_SYNC_PAST_MALFORMED
+   :verifies: REQ_SYNC_PAST_MALFORMED
+
+   ``tests/test_parse.py::test_the_highest_id_counts_malformed_rows_too``,
+   ``tests/test_parse.py::test_a_row_without_a_readable_id_reports_no_highest_id``,
+   ``tests/test_client_sync.py::test_a_malformed_newest_row_is_skipped_and_the_offset_moves_past_it``,
+   ``tests/test_client_sync.py::test_the_next_run_resumes_past_a_malformed_newest_row``,
+   ``tests/test_client_sync.py::test_a_page_of_only_malformed_rows_advances_by_their_ids``,
+   ``tests/test_cli.py::test_sync_with_only_malformed_rows_reports_them_and_succeeds``
+
 .. test:: A malformed row is skipped and counted
    :id: TEST_MALFORMED_SKIP
    :verifies: REQ_MALFORMED_SKIP

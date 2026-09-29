@@ -62,7 +62,11 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   checks existed: `to_gpx` (`_finite`) and `to_geojson` (`allow_nan=False`)
   both raise, and `cmd_export` converts it. `to_csv` deliberately does not —
   it is a raw dump of the cache. A comment must not claim wider coverage than
-  that.
+  that. "Never crash" includes `sync`: `parse_positions` returns the highest
+  id on the page, skipped rows included, and `sync` advances to it
+  (`REQ_SYNC_PAST_MALFORMED`) — advancing only to the last *parsed* id made a
+  malformed newest row fail every later run. It raises only when a page has
+  skipped rows and no readable id at all.
 - **Read-only commands must not create the cache.** `export` and `purge` touch
   the database only when it already exists; `purge` unlinks it (plus any
   `-journal`/`-wal`/`-shm`, via `store.cache_files`, which `Store.purge()`
@@ -353,12 +357,14 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   envelope (bare list vs. `{"data": [...]}`). It never runs in CI and never
   needs credentials there; it requires a real account and is opt-in only.
 
-  Note the `fix_at` symptom changed with the range check: a unit that is
-  neither seconds nor milliseconds (microseconds, say) is now *skipped* at
-  parse time, so the live test fails with `sync page ... was unparseable`
-  plus a skip count rather than printing an absurd `fix_at`. Read the raw CSV
-  body through `client._api("POST", "/api/v2/trackers/sync", ...)` to see the
-  actual value in that case.
+  Note the `fix_at` symptom changed twice: a unit that is neither seconds nor
+  milliseconds (microseconds, say) is *skipped* at parse time, and since #18
+  a page of skipped rows with readable ids is passed rather than raised on.
+  So the live test fails on its `assert rows` (the message carries the skip
+  count), and a plain `sync` exits 0 with `0 new positions` and
+  `skipped N malformed rows` — read that line, it is the only signal. Read the
+  raw CSV body through `client._api("POST", "/api/v2/trackers/sync", ...)` to
+  see the actual value in that case.
 - `fix_at` is normalised to epoch seconds at parse time. Nothing downstream
   should handle milliseconds.
 - **Unit conventions, verified live 2026-09-17 (spec §3.6).** These are not
