@@ -14,7 +14,7 @@
 # deploy/.env (see README "Exposing the stack to the LAN").
 services:
   influxdb:
-    image: influxdb:2
+    image: influxdb:2.7  # pinned, not floating `2`, so a pull is reproducible
     restart: unless-stopped
     environment:
       DOCKER_INFLUXDB_INIT_MODE: setup
@@ -28,12 +28,21 @@ services:
     volumes:
       - influxdb-data:/var/lib/influxdb2
       - influxdb-config:/etc/influxdb2
+    # So grafana and ingest wait for readiness, not just for the container to
+    # start. `influx ping` ships in the image; curl does not.
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
 
   grafana:
-    image: grafana/grafana:11.3.0
+    image: grafana/grafana:11.6.1  # bumped off 11.3.0 (2024-10), a pinned patch
     restart: unless-stopped
     depends_on:
-      - influxdb
+      influxdb:
+        condition: service_healthy
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
       INFLUXDB_ORG: ${INFLUXDB_ORG}
@@ -52,7 +61,8 @@ services:
       dockerfile: deploy/ingest/Dockerfile
     restart: unless-stopped
     depends_on:
-      - influxdb
+      influxdb:
+        condition: service_healthy
     environment:
       TRACKIWI_INFLUX_URL: http://influxdb:8086
       TRACKIWI_INFLUX_VERSION: "2"
