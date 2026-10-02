@@ -381,8 +381,15 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
     `"UTC"`. The parser enforces it (`int()`), the schema declares `INTEGER`,
     and a test pins the chain parse → store → CSV. Its *semantics* are still
     open; nothing depends on them, because everything is handled in UTC.
-  - **`speed` and `altitude` units are still unverified.** Do not document a
-    unit for either.
+  - **`speed` is km/h, `altitude` is metres, `course` is degrees clockwise
+    from true north** (verified 2026-10-02 against the cached history, #28).
+    Speed ÷ (haversine distance ÷ time) between consecutive moving fixes is
+    3.57 (n ≈ 51k; 3.6 = km/h), converging to 3.58 above 60 km/h — the lower
+    ratio at walking pace is GPS jitter lengthening short hops, not a unit
+    issue. Course minus the bearing between fixes has a median of −0.5°.
+    Altitude reads 7–21 at sea-level campsites and matches a known pass
+    elevation within 5 m. The InfluxDB names `speed_kmh`, `altitude_m` and
+    `course_deg` are therefore correct.
 - **`fix_at` has two types on two endpoints, and there are two functions for
   that reason.** The sync CSV sends an **epoch integer in seconds**;
   `GET /api/v2/trackers` sends an **ISO 8601 string** inside

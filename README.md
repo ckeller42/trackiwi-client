@@ -143,8 +143,11 @@ do not say it and the vendor documents nothing:
 - **`fix_timezone` is an integer offset**, not a zone name. Its exact
   interpretation is unconfirmed; nothing in this tool depends on it, because
   every timestamp is handled and exported in UTC.
-- **`speed` and `altitude` units are unconfirmed.** They are passed through
-  unchanged rather than converted to something that might be wrong.
+- **`speed` is km/h, `altitude` is metres, `course` is degrees** clockwise
+  from true north. Verified against recorded drives: reported speed is 3.6×
+  the speed derived from consecutive positions, and the course matches the
+  bearing between fixes. The InfluxDB fields are named accordingly
+  (`speed_kmh`, `altitude_m`, `course_deg`).
 
 `--from`/`--to` are inclusive UTC calendar days (`YYYY-MM-DD`); giving a `--to`
 before `--from` is rejected with an error rather than silently returning
