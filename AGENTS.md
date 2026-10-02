@@ -349,6 +349,9 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   TRACKIWI_LIVE=1 .venv/bin/pytest -m live -s -v
   ```
 
+  How to read the result and what to do on drift:
+  `.claude/skills/check-trackiwi-api/SKILL.md`.
+
   This test exists to answer open questions about the real API that can't be
   settled from the spec alone — the unit of `fix_at` (seconds vs.
   milliseconds), real field magnitudes, and the shape of the tracker response
