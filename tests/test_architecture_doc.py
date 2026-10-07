@@ -1,8 +1,8 @@
 """The Component diagram in docs/architecture.rst must match the real imports.
 
 A diagram that no longer matches the code is worse than none. The arrows are the
-package's intra-package imports; the shared contracts in `trackiwi/__init__.py`
-are deliberately not drawn (the page says so).
+package's intra-package imports, the `python -m trackiwi` entry point included; the
+shared contracts in `trackiwi/__init__.py` are deliberately not drawn (the page says so).
 """
 
 import ast
@@ -21,7 +21,7 @@ def _diagram():
 
 
 def _package():
-    modules = {p.stem for p in (ROOT / "trackiwi").glob("*.py")} - {"__init__", "__main__"}
+    modules = {p.stem for p in (ROOT / "trackiwi").glob("*.py")} - {"__init__"}
     edges = set()
     for name in modules:
         tree = ast.parse((ROOT / "trackiwi" / f"{name}.py").read_text(encoding="utf-8"))

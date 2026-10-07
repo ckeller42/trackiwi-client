@@ -87,13 +87,15 @@ them.
      Container_Boundary(pkg, "trackiwi package") {
        Component(heading, "heading", "pure", "Heading estimate")
        Component(cli, "cli", "argparse", "Commands, exit codes")
-       Component(client, "client", "urllib", "trackiwi API, sync")
-       Component(http, "_http", "urllib", "No redirects, send, redact")
+       Component(entry, "__main__", "python -m", "Entry point")
        Component(export, "export", "pure", "GPX, GeoJSON, CSV")
-       Component(store, "store", "sqlite3", "Cache, mirror position")
        Component(influx, "influx", "urllib", "Writer, resumable mirror")
+       Component(client, "client", "urllib", "trackiwi API, sync")
+       Component(store, "store", "sqlite3", "Cache, mirror position")
        Component(lineprotocol, "lineprotocol", "pure", "Row to line protocol")
+       Component(http, "_http", "urllib", "No redirects, send, redact")
      }
+     Rel(entry, cli, "calls")
      Rel(cli, client, "uses")
      Rel(cli, store, "uses")
      Rel(cli, influx, "uses")
@@ -104,7 +106,7 @@ them.
      Rel(influx, lineprotocol, "uses")
      Rel(influx, store, "uses")
      Rel(heading, export, "uses")
-     UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")
+     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 
 Rules the shape encodes:
 
