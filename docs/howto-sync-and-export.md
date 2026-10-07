@@ -30,7 +30,7 @@ Sync is offset-based. Run it again after any interruption; there is no retry log
 re-running is the retry. Everything fetched before a failure is already saved. Rows that
 cannot be trusted (wrong field count, missing id, tracker, timestamp or coordinate,
 non-finite coordinate, timestamp out of range) are skipped and counted on stderr, never
-stored. The [sync sequence](architecture.md#6-runtime-view) shows the exact flow.
+stored. The [sync sequence](architecture.rst) shows the exact flow.
 
 If a sync fails with `trackiwi returned no new records past offset N`, the server did not
 advance past the offset just requested; see the

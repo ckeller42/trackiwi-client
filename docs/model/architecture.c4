@@ -1,0 +1,146 @@
+specification {
+  element person
+  element system
+  element container
+  element component
+  element database { style { shape cylinder } }
+  element external { style { color muted } }
+  deploymentNode node
+  deploymentNode runtime
+}
+
+model {
+  owner = person 'Vehicle owner' 'Reads their own data'
+  cloud = external 'trackiwi cloud' 'Vendor API, holds the account and position history'
+  influxdb = external 'InfluxDB 2.x' 'Time-series store'
+  grafana = external 'Grafana' 'Portable Flux dashboard'
+  tracker = external 'Vehicle GPS tracker' 'Reports positions to the vendor'
+
+  tw = system 'trackiwi-client' 'Read-only CLI and library' {
+    scheduler = container 'Scheduler' 'systemd timer or Docker loop runs trackiwi ingest'
+    pkg = container 'trackiwi package' 'Python 3.11+, stdlib only' {
+      entry = component '__main__' 'Entry point'
+      cli = component 'cli' 'Commands, exit codes'
+      client = component 'client' 'trackiwi API, sync'
+      store = component 'store' 'Cache, mirror position'
+      influx = component 'influx' 'Writer, resumable mirror'
+      export = component 'export' 'GPX, GeoJSON, CSV'
+      heading = component 'heading' 'Heading estimate'
+      lineprotocol = component 'lineprotocol' 'Row to line protocol'
+      http = component '_http' 'No redirects, send, redact'
+
+      entry -> cli 'calls'
+      cli -> client 'uses'
+      cli -> store 'uses'
+      cli -> influx 'uses'
+      cli -> export 'uses'
+      cli -> heading 'uses'
+      client -> http 'uses'
+      influx -> http 'uses'
+      influx -> lineprotocol 'uses'
+      influx -> store 'uses'
+      heading -> export 'uses'
+    }
+    cache = database 'Position cache' 'SQLite, mode 0600: positions, mirror_state, names'
+    config = database 'Session and target config' 'config.json, influx.toml, mode 0600'
+  }
+
+  owner -> tw.pkg 'Runs commands'
+  owner -> grafana 'Views'
+  tracker -> cloud 'Reports positions'
+  grafana -> influxdb 'Queries (Flux)'
+  tw.scheduler -> tw.pkg 'Runs ingest'
+  tw.pkg -> tw.cache 'Reads and writes'
+  tw.pkg -> tw.config 'Reads'
+  tw.pkg -> cloud 'Pulls positions (HTTPS, read-only)'
+  tw.pkg -> influxdb 'Pushes points (HTTP)'
+  tw.pkg.client -> cloud 'Pulls positions'
+  tw.pkg.influx -> influxdb 'Pushes points'
+  tw.pkg.store -> tw.cache 'Reads and writes'
+}
+
+deployment {
+  compose = node 'Your machine' 'Docker Compose, ports bound to 127.0.0.1' {
+    ingestc = runtime 'ingest' 'python:3.13-slim, loops trackiwi ingest' {
+      instanceOf tw.pkg
+    }
+    influxc = runtime 'influxdb' 'influxdb:2.7, bucket trackiwi' {
+      instanceOf influxdb
+    }
+    grafanac = runtime 'grafana' 'Grafana 11, provisioned dashboard' {
+      instanceOf grafana
+    }
+    statec = runtime 'trackiwi-state' 'Docker volume: session, position cache' {
+      instanceOf tw.cache
+    }
+  }
+  linux = node 'Your machine' 'Linux, systemd user timer, pipx install' {
+    timer = runtime 'trackiwi-ingest.timer' 'Runs the service every 10 minutes' {
+      instanceOf tw.scheduler
+    }
+    pipx = runtime 'trackiwi' 'pipx, Python 3.11+' {
+      instanceOf tw.pkg
+    }
+    files = runtime 'Cache and config' '~/.local/share/trackiwi, ~/.config/trackiwi, mode 0600' {
+      instanceOf tw.cache
+    }
+  }
+  yours = node 'Your InfluxDB and Grafana' 'existing instance, write token scoped to one bucket' {
+    influxy = runtime 'InfluxDB 2.x' {
+      instanceOf influxdb
+    }
+    grafanay = runtime 'Grafana 10+' 'Imported dashboard' {
+      instanceOf grafana
+    }
+  }
+}
+
+views {
+  deployment view deploy-compose {
+    title 'Deployment: Docker Compose stack'
+    include compose.**
+    autoLayout LeftRight
+  }
+  deployment view deploy-systemd {
+    title 'Deployment: systemd timer with your own InfluxDB'
+    include linux.**, yours.**
+    autoLayout LeftRight
+  }
+
+  view context {
+    title 'System context'
+    include owner, tw, cloud, influxdb, grafana, tracker
+    autoLayout LeftRight
+  }
+
+  view containers of tw {
+    title 'Containers'
+    include *, owner, cloud, influxdb, grafana
+    exclude tw.pkg.*
+    autoLayout LeftRight
+  }
+
+  view components of tw.pkg {
+    title 'Components: the trackiwi package'
+    include *, cloud, influxdb, tw.cache
+    autoLayout TopBottom
+  }
+
+  dynamic view ingest {
+    title 'One ingest run'
+    variant sequence
+
+    tw.scheduler -> tw.pkg.cli 'trackiwi ingest'
+    tw.pkg.cli -> tw.pkg.store 'max_id'
+    tw.pkg.cli -> tw.pkg.client 'sync(offset)'
+    tw.pkg.client -> cloud 'POST /api/v2/trackers/sync'
+    tw.pkg.cli -> tw.pkg.store 'upsert rows'
+    tw.pkg.cli -> tw.pkg.client 'trackers()'
+    tw.pkg.client -> cloud 'GET /api/v2/trackers'
+    tw.pkg.cli -> tw.pkg.store 'store names'
+    tw.pkg.cli -> tw.pkg.influx 'mirror(store)'
+    tw.pkg.influx -> tw.pkg.store 'mirror_position, rows_after'
+    tw.pkg.influx -> influxdb 'gzip line protocol, one batch'
+    tw.pkg.influx -> tw.pkg.store 'set_mirror_position(last id)'
+  }
+}

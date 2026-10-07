@@ -1,0 +1,9 @@
+/* Mermaid draws dark lines and labels. Give each diagram a light card so it is
+   readable in both the light and the dark theme. */
+.mermaid {
+  background: #fff;
+  color: #1b1f23;
+  border-radius: 8px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}

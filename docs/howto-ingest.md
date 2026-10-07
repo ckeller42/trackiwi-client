@@ -7,7 +7,7 @@ How a specific machine is deployed lives in the repository that deploys that mac
 in this one.
 
 Before you start, [install and log in](getting-started.md) on the host that will run the
-timer. The way the pieces fit is on the [architecture page](architecture.md#6-runtime-view).
+timer. The way the pieces fit is on the [architecture page](architecture.rst).
 
 ## What ingest does
 

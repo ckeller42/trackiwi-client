@@ -84,15 +84,15 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
 
 - The site under `docs/` has four groups, in this order: Getting started, How-to guides, Reference,
   Explanation (plus Contributing). A page belongs to exactly one; `docs/index.rst` holds the toctrees.
-- One architecture page, `docs/architecture.md`: arc42 sections 1 to 12, drawn with C4-styled
-  Mermaid flowcharts and sequence diagrams (person `#08427b`, system `#1168bd`, container
-  `#438dd5`, external `#999`). No `;`, bare `&`, bare `<`/`>`, `<-->` or `:` in a loop/opt label.
-  Diagram text must match the code. Behaviour claims link to a `REQ_*` (`{need}`) or a module.
+- One architecture page, `docs/architecture.rst`: the arc42 sections, with the C4 views drawn from the
+  LikeC4 model (`docs/model/architecture.c4`, see Architecture diagrams above) and plain sequences in
+  Mermaid. Mermaid rule: no `;`, bare `&`, bare `<`/`>`, `<-->` or `:` in a loop/opt label.
+  Diagram text must match the code. Behaviour claims link to a `REQ_*` (`:need:`) or a module.
 - One source per fact: a how-to or reference page links to the README or requirements, it does
   not copy them. A new requirement-like statement stays prose unless code implements it and a
   test verifies it (then it gets a `REQ_*`, see Rules above).
-- `sphinx-build -b html -W docs docs/_build/html` must pass (the `docs` job); `myst-parser` and
-  `sphinxcontrib-mermaid` are pinned in the `dev` extra and are docs tooling, never runtime deps.
+- `sphinx-build -b html -W docs docs/_build/html` must pass (the `docs` job); `myst-parser`,
+  `sphinxcontrib-mermaid` and `sphinx-likec4` are pinned in the `dev` extra and are docs tooling, never runtime deps.
 - The concept (shared by all ckeller42 repos) is `DOCUMENTATION.md` in `ckeller42/buspi-config`.
 
 ## Workflow
@@ -120,6 +120,9 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   `detect-secrets` (`.secrets.baseline`, regenerate and audit before committing)
   and `SECRET_RE` in `tools/check_no_private_data.py`. Keep all three.
 - `python -m trackiwi …` runs straight from a clone.
+- **Architecture diagrams** (LikeC4 model `docs/model/architecture.c4`, shown by `docs/architecture.rst`; the doc build needs
+  node 20+). When a module boundary changes, update the model: `tests/test_architecture_doc.py`
+  fails if the component relations stop matching the real imports.
 - **Releasing:** the version has one source, `trackiwi/__init__.py`
   (`pyproject.toml` reads it). Bump it in a PR; after merge tag the merge
   commit `vX.Y.Z` and create a GitHub release. Deployment steps for a specific

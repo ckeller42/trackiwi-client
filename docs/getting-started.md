@@ -76,4 +76,4 @@ trackiwi purge --yes   # deletes the position cache
   [ingest into InfluxDB and Grafana](howto-ingest.md).
 - Look something up: [CLI](reference/cli.md), [units](reference/units.md),
   [export formats](reference/exports.md).
-- Why it is built this way: [architecture](architecture.md).
+- Why it is built this way: [architecture](architecture.rst).
