@@ -1,14 +1,10 @@
 """Local SQLite cache of positions.
 
 This is the only module that touches the database. It performs no network I/O.
-`TrackiwiError` comes from `trackiwi/__init__.py`, the shared-contract module,
-not from `client.py`: the design spec (section 4) deliberately keeps one
-exception pair instead of a hierarchy, and a corrupt cache has to be
-reportable as a user-facing error rather than as a raw `sqlite3` exception.
+Open failures surface as `TrackiwiError`, never raw `sqlite3` exceptions.
 
-The cache is a complete movement history of a physical vehicle, so the file is
-created owner-only inside an owner-only directory. See the design spec,
-section 7.1.
+The cache is a complete movement history, so the file is created owner-only
+inside an owner-only directory.
 """
 
 from __future__ import annotations
@@ -51,10 +47,7 @@ CREATE TABLE IF NOT EXISTS tracker_names (
 """
 
 
-#: Suffixes SQLite appends to the database file name for its rollback journal
-#: and WAL bookkeeping. A journal or WAL left behind by a crashed write holds
-#: position rows just like the database does, so deleting the history means
-#: deleting these too.
+#: Suffixes SQLite appends for its rollback journal and WAL; they can hold rows.
 SIDECAR_SUFFIXES = ("-journal", "-wal", "-shm")
 
 
@@ -68,9 +61,7 @@ def default_db_path() -> Path:
 def cache_files(path: Path) -> tuple[Path, ...]:
     """Every file that can hold cached positions for the database at `path`.
 
-    The single definition behind both `trackiwi purge` and `Store.purge()`:
-    the two used to delete different sets of files while claiming to be
-    equivalent, which made the library API the weaker privacy promise.
+    Shared by `trackiwi purge` and `Store.purge()`.
     """
     return (path, *(path.with_name(path.name + suffix) for suffix in SIDECAR_SUFFIXES))
 
@@ -92,12 +83,9 @@ class Store:
         """
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.path.parent, 0o700)
-        # Create the file at 0600 *before* sqlite3 can create it at the umask
-        # default: the cache is a movement history, and a chmod after the fact
-        # leaves a window in which another local process can open it and keep
-        # the descriptor. The descriptor is closed immediately; sqlite3 opens
-        # its own. O_CREAT's mode applies to a new file only, so the chmod
-        # below still does the steady-state self-heal for an existing file.
+        # Create at 0600 before sqlite3 can create it at the umask default (no
+        # chmod window). O_CREAT's mode applies to new files only; the chmod
+        # below heals an existing one.
         try:
             os.close(os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600))
             os.chmod(self.path, 0o600)
@@ -108,27 +96,18 @@ class Store:
             conn.row_factory = sqlite3.Row
             conn.executescript(_SCHEMA)
         except sqlite3.Error as error:
-            # A corrupt or non-database file used to raise sqlite3.DatabaseError
-            # here, which is not a TrackiwiError and escaped main() as a
-            # traceback that gave no hint how to recover. Close the connection
-            # on the way out so a short-lived CLI does not leak it either.
+            # Close the connection before converting to TrackiwiError.
             conn.close()
             raise self._open_failure(error) from error
         self._conn = conn
         return self
 
     def _open_failure(self, error: sqlite3.Error) -> TrackiwiError:
-        """Turn a failure to open the cache into the *right* user-facing error.
+        """Map an open failure to a user-facing error.
 
-        The two conditions need opposite advice, and telling them apart is not
-        cosmetic. A locked database is transient — another `trackiwi` process
-        (or a hung one) holds a write lock — and the data is intact; a corrupt
-        one is only recoverable by deleting it. Reporting a lock as corruption
-        told the user to run `trackiwi purge --yes`, which deletes a complete
-        movement history (spec section 7.1) that nothing was wrong with.
-        `sqlite3.OperationalError` is a subclass of `sqlite3.DatabaseError`, so
-        the lock check has to come first. The sqlite text is included either
-        way: without it neither case could be diagnosed from the CLI output.
+        A lock is transient (wait and re-run, never purge); anything else is
+        corruption and gets the purge advice. The lock check comes first
+        because `OperationalError` subclasses `DatabaseError`.
         """
         detail = str(error)
         if isinstance(error, sqlite3.OperationalError) and (
@@ -161,12 +140,8 @@ class Store:
     def upsert(self, rows: Iterable[tuple[Any, ...]]) -> int:
         """Insert or replace `rows`, returning how many were *newly inserted*.
 
-        The count is a row-count delta rather than `len(rows)`, because
-        `INSERT OR REPLACE` cannot distinguish an insert from a replace and the
-        CLI reports this number to the user as "N new positions": returning the
-        batch size made `sync --full` over an unchanged cache claim every
-        re-fetched row was new. A delta also stays correct when a batch repeats
-        an id within itself.
+        The count is a row-count delta, since `INSERT OR REPLACE` cannot tell
+        an insert from a replace.
         """
         placeholders = ",".join("?" * len(COLUMNS))
         sql = f"INSERT OR REPLACE INTO positions ({','.join(COLUMNS)}) VALUES ({placeholders})"
@@ -178,8 +153,6 @@ class Store:
 
     def max_id(self) -> int | None:
         """Return the highest stored position id, or ``None`` when empty."""
-        # `fetchone()` and its columns are `Any` (sqlite3 has no row types); the
-        # annotated local pins the boundary so the return stays honestly typed.
         highest: int | None = self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]
         return highest
 
@@ -224,8 +197,7 @@ class Store:
     def set_mirror_position(self, target: str, last_id: int) -> None:
         """Record that every row up to `last_id` reached `target`, and commit.
 
-        Committed immediately so that a later failure in the same run cannot
-        roll back progress that InfluxDB has already acknowledged.
+        Commits immediately so a later failure cannot roll back acknowledged progress.
         """
         self.conn.execute(
             "INSERT OR REPLACE INTO mirror_state (target, last_id) VALUES (?, ?)",
@@ -253,9 +225,8 @@ class Store:
     def name_unnamed_trackers(self) -> None:
         """Give every cached tracker that has no stored name ``tracker <id>``.
 
-        Implements :need:`REQ_MIRROR_FALLBACK_NAME`. ``INSERT OR IGNORE`` is
-        the whole rule: a stored name, real or fallback, is never overwritten
-        here, while `set_tracker_names` replaces a fallback with a real name.
+        Implements :need:`REQ_MIRROR_FALLBACK_NAME`. Never overwrites a stored
+        name; `set_tracker_names` may replace a fallback.
         """
         self.conn.execute(
             "INSERT OR IGNORE INTO tracker_names (tracker_id, name) "
@@ -275,11 +246,8 @@ class Store:
 
         Implements :need:`REQ_PURGE_DELETES`.
 
-        The library-level equivalent of `trackiwi purge`, and equivalent in
-        what it deletes as well as in name: both go through `cache_files`, so
-        a library consumer gets the same guarantee as a CLI user. The CLI
-        deliberately does *not* go through here: it unlinks the paths without
-        opening the database, so that a corrupt cache can still be deleted.
+        Library twin of `trackiwi purge` (same `cache_files`). The CLI does not
+        call this: it unlinks without opening, so a corrupt cache still goes.
         """
         if self._conn is not None:
             self._conn.close()

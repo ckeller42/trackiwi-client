@@ -423,12 +423,6 @@ mode `0600` in a `0700` directory, but **it will be swept into Time Machine and
 any cloud backup**. Delete it with `trackiwi purge --yes` when you no longer
 need it.
 
-**The token grants live location, not just history.** It is stored in
-`~/.config/trackiwi/config.json` mode `0600`. That file is readable by any
-process running as you, and is captured in backups as plaintext. Moving it to
-the macOS Keychain would be a real improvement and is the recommended upgrade.
-Your password is never stored.
-
 **Never pass the token as a command-line argument.** `trackiwi login --token
 <token> ...` writes the token verbatim into your shell history file
 (`~/.zsh_history`, `~/.bash_history`) — plaintext, long-lived, and swept into
@@ -438,8 +432,10 @@ of the command. This is the same credential that grants live location. Use
 `trackiwi login --token - --api-base <server>` instead: stdin touches neither
 the history file nor `argv`, and on a terminal the prompt does not echo.
 
-`logout` revokes the session server-side before deleting the local copy;
-deleting a local copy of a still-valid token would be fake security. If revocation fails (network or server error), the local credentials are still removed and the token may remain valid until revoked in the app. The same applies when the stored API base is unusable (an `http://` value in a hand-edited config): `logout` still removes the credentials rather than leaving a token that cannot be deleted with the tool, and says on stderr that it must be revoked in the app.
+`logout` revokes the session server-side before deleting the local copy. If
+revocation fails, or the stored API base is unusable (an `http://` value in a
+hand-edited config), the local credentials are still removed and the token may
+stay valid until you revoke it in the app; `logout` says so on stderr.
 
 **Never share a trackiwi URL containing a `token=` parameter.** Their app
 accepts `?token=...&apibase=...` for auto-login, so such a link hands over full

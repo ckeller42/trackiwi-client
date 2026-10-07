@@ -1,17 +1,12 @@
 """Estimate which way a tracker is pointing from cached positions.
 
-Pure: rows in, an estimate out. No I/O and no network. Everything here is
-arithmetic over positions that `sync` has already cached, so it stays inside
-the read-only, zero-dependency design.
+Pure: rows in, an estimate out. No I/O, no network.
 
-**Why this exists.** The feed exposes exactly one directional field,
-`course`, and it is GPS course-over-ground — the direction of *travel*. It
-means something only while the device is moving: on a parked device the raw
-value drifts and only rarely matches the way the vehicle actually stands. There
-is no compass field, so a stationary heading cannot be sensed; it can only be
-*inferred* from the approach.
+The feed's only directional field, `course`, is GPS course-over-ground: it
+means something only while moving and drifts when parked. There is no compass,
+so a stationary heading is inferred from the approach.
 
-**Caveats, stated once here and repeated on the CLI.** The parked heading
+**Caveats, repeated on the CLI.** The parked heading
 assumes the vehicle stopped nose-first in its direction of travel. A vehicle
 that reversed into its spot points the other way, and nothing in the data
 reveals that. Every value from this module is an estimate; GPS alone cannot
@@ -30,12 +25,8 @@ from . import Row
 from .export import by_tracker
 
 #: Seconds after the last moving fix at which a parked estimate becomes
-#: ``stale``. One hour: on a device that reports while parked the raw
-#: ``course`` has usually drifted by then, and a vehicle that has stood for an
-#: hour may well have been moved by hand, towed, or re-parked in a way the
-#: feed did not catch (a pushed-back trailer, say). The threshold is a
-#: judgement about how far to trust an old approach, not a physical constant,
-#: so it is a parameter everywhere it is used.
+#: ``stale``. A judgement call (the vehicle may have been moved by hand), so
+#: it stays a parameter.
 DEFAULT_STALE_AFTER = 3600
 
 State = Literal["moving", "freshly_parked", "stale", "unknown"]
@@ -82,12 +73,8 @@ def initial_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 
     Implements :need:`REQ_HEADING_ESTIMATE`.
 
-    Degrees clockwise from true north, on a spherical Earth. The forward
-    azimuth at the *start* of the arc is what a vehicle heading is: over the
-    few metres between two consecutive fixes the great circle and the rhumb
-    line are indistinguishable anyway. Works across the antimeridian because
-    the longitude difference goes through ``sin``/``cos`` rather than being
-    compared numerically.
+    Degrees clockwise from true north, spherical Earth. Works across the
+    antimeridian because the longitude difference goes through ``sin``/``cos``.
 
     >>> initial_bearing(0.0, 0.0, 1.0, 0.0)
     0.0
@@ -105,8 +92,7 @@ def initial_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     x = math.sin(delta) * math.cos(phi2)
     y = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(delta)
     bearing = math.degrees(math.atan2(x, y)) % 360.0
-    # `%` maps a negative angle a hair below zero to exactly 360.0 under
-    # floating point; the contract is the half-open interval.
+    # `%` can round a tiny negative angle to exactly 360.0; keep it half-open.
     return 0.0 if bearing >= 360.0 else bearing
 
 
@@ -127,10 +113,8 @@ def _course(row: Row) -> tuple[float | None, Source]:
 def _bearing_between(earlier: Row, later: Row) -> float | None:
     """Bearing ``earlier`` → ``later``, or ``None`` when the pair cannot give one.
 
-    Two fixes at the same coordinates have no direction between them, and a
-    non-finite coordinate (possible in a row cached before parse-time checks
-    existed) would make the trigonometry raise; both fall back to ``None`` so
-    the caller can use the raw ``course`` instead.
+    Identical or non-finite coordinates give ``None`` so the caller falls
+    back to the raw ``course``.
     """
     points = (earlier["latitude"], earlier["longitude"], later["latitude"], later["longitude"])
     if not all(math.isfinite(value) for value in points):
@@ -162,18 +146,11 @@ def estimate_heading(
     ``rows`` must belong to a single tracker and be ordered by time, as
     `Store.query(tracker_id=...)` returns them; the last row is the current
     fix. ``now`` (epoch seconds, default: the wall clock) and ``stale_after``
-    (seconds, default `DEFAULT_STALE_AFTER`) decide ``freshly_parked`` versus
-    ``stale``.
+    decide ``freshly_parked`` versus ``stale``.
 
-    Moving (last ``speed > 0``): the heading is that fix's ``course``. Parked:
-    the heading is the initial bearing between the last two fixes that were
-    moving — the direction of approach — and only when that bearing is
-    undefined (a single moving fix, or two at the same spot) the last moving
-    fix's raw ``course``. No moving fix at all is ``unknown``, never an error.
-
-    The parked estimate assumes the vehicle stopped nose-first; a vehicle that
-    reversed into its spot points the opposite way and this cannot be told
-    from the data. See the module docstring.
+    Moving: the last fix's ``course``. Parked: the bearing between the last two
+    moving fixes, else the last moving fix's ``course``. No moving fix is
+    ``unknown``, never an error. See the module docstring for caveats.
 
     >>> def fix(fix_at, lat, lon, speed, course):
     ...     return {"fix_at": fix_at, "latitude": lat, "longitude": lon,
@@ -216,10 +193,8 @@ def estimate_headings(
 
     Implements :need:`REQ_HEADING_ESTIMATE`.
 
-    Groups by ``tracker_id`` first, because `Store.query()` without a tracker
-    filter interleaves devices by time, and a fix from another device must
-    never serve as a vehicle's "previous position". Keys follow first
-    appearance, i.e. earliest fix.
+    Groups by ``tracker_id`` first so another device's fix never serves as a
+    "previous position". Keys follow first appearance.
 
     >>> rows = [
     ...     {"tracker_id": 1, "fix_at": 100, "latitude": 0.0, "longitude": 0.0,

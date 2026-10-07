@@ -70,8 +70,7 @@ def _read_file(path: Path) -> dict[str, Any]:
     """Read the TOML file, narrowing a widened mode first (REQ_CONFIG_MODE_0600)."""
     if not path.exists():
         return {}
-    # A config widened by a restore or a copy is narrowed back, mirroring the
-    # trackiwi session file. Failing to chmod must not stop the load.
+    # Narrow a widened mode, as for the session file; a chmod failure is ignored.
     with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
     try:
@@ -159,14 +158,10 @@ _RETENTION_DROP = b"beyond retention policy"
 class InfluxWriter:
     """Talks to one InfluxDB target: detect the version, write, check.
 
-    Implements :need:`REQ_INFLUX_WRITE_SCOPE` (the only writes are POSTs of
-    line protocol to the configured target's write endpoint) and
-    :need:`REQ_INFLUX_TOKEN_REDACT` (credentials are scrubbed from every
-    message built from server-controlled text). Redirects are never
-    followed, so a 3xx is an error rather than an acknowledgement and the
-    credentials never travel to another address (:need:`REQ_MIRROR_RESUME`).
-    `opener` exists so tests can inject a fake transport, exactly as in
-    `client.Client`.
+    Implements :need:`REQ_INFLUX_WRITE_SCOPE` and
+    :need:`REQ_INFLUX_TOKEN_REDACT`. Redirects are never followed, so a 3xx
+    is an error, not an acknowledgement (:need:`REQ_MIRROR_RESUME`).
+    `opener` lets tests inject a fake transport.
     """
 
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
@@ -196,10 +191,8 @@ class InfluxWriter:
     ) -> tuple[int, Message, bytes]:
         """Perform one request and return ``(status, headers, body)``.
 
-        A 3xx raises: redirects are not followed (see `_http.no_redirect_opener`), and a
-        redirect must never be mistaken for an answer. Every transport failure
-        — including a timeout or reset while reading the response, which
-        urllib does not wrap in `URLError` — becomes a `TrackiwiError`.
+        A 3xx raises (see `_http.no_redirect_opener`). Every transport failure
+        becomes a `TrackiwiError`.
         """
         url = self.config.url + path
         if query:
@@ -302,10 +295,8 @@ class InfluxWriter:
             return
         detail = _http.redact(response[:200].decode("utf-8", "replace"), *self._secrets)
         if 400 <= status < 500 and _RETENTION_DROP in response:
-            # A partial write: InfluxDB stored every point it could and dropped
-            # the ones older than the bucket's retention, which it will never
-            # accept. Refusing the batch would re-send it forever and stall the
-            # mirror behind it, so it counts as acknowledged (REQ_MIRROR_RESUME).
+            # Partial write: the dropped points will never be accepted, so
+            # count the batch as acknowledged rather than stall the mirror.
             print(
                 f"warning: InfluxDB dropped points outside the retention of "
                 f"{self._target_name()} (HTTP {status}): {detail}",
@@ -378,19 +369,11 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
     """Send every cached row not yet mirrored to the writer's target.
 
     Implements :need:`REQ_MIRROR_RESUME`: the stored position advances only
-    after a batch is acknowledged, so it never moves past a row InfluxDB has
-    not accepted, and a failure leaves earlier batches recorded. Implements
-    :need:`REQ_MIRROR_IDEMPOTENT`: a row always becomes the same point (same
-    tags, same timestamp), which InfluxDB overwrites rather than duplicates,
-    so re-sending is always safe. That is why the ``tracker_name`` tag is only
-    ever the stored name: a batch holding a row whose tracker has no stored
-    name is not sent at all (the mirror stops before it with a
-    `TrackiwiError`), because a tag made up here would later split that
-    tracker into two series. `ingest` stores a name for every cached tracker
-    (:need:`REQ_MIRROR_FALLBACK_NAME`), so this only happens before the first
-    name refresh that succeeds.
-    Returns the number of points sent; the first failed batch re-raises its
-    `TrackiwiError`.
+    after a batch is acknowledged. Implements :need:`REQ_MIRROR_IDEMPOTENT`:
+    a row always becomes the same point, so re-sending is safe; hence
+    ``tracker_name`` is only the stored name, and a batch with an unnamed
+    tracker raises `TrackiwiError` before sending.
+    Returns the number of points sent; the first failed batch re-raises.
     """
     target = writer.target_key()
     last = store.mirror_position(target)
