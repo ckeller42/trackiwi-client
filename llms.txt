@@ -21,12 +21,6 @@
 ## Docs
 
 - [README](README.md): install, usage, exit codes, and the security posture.
-- [Design spec](docs/superpowers/specs/2026-09-17-trackiwi-client-design.md): the
-  reverse-engineered API reference, architecture, cache schema, error handling,
-  and open questions.
-- [InfluxDB & Grafana spec](docs/superpowers/specs/2026-09-25-influx-ingest-grafana-design.md):
-  the mirror into InfluxDB, the `influx`/`ingest` commands, and the Grafana
-  dashboard and deploy stack.
 - [AGENTS.md](AGENTS.md): contributor and agent rules, invariants verified against the live
   API, and repo/CI setup.
 - [SECURITY.md](SECURITY.md): what is sensitive and how to report a concern.
