@@ -22,18 +22,19 @@ InfluxDB the owner runs.
 
    C4Context
      title System context: trackiwi-client
-     Person(owner, "Vehicle owner", "Reads their own tracker data")
-     System(client, "trackiwi-client", "Read-only CLI and library: syncs positions into a local cache, exports GPX, GeoJSON and CSV, mirrors to InfluxDB")
-     System_Ext(cloud, "trackiwi cloud", "Vendor service and its private API; holds the account and the position history")
-     System_Ext(tracker, "Vehicle GPS tracker", "Reports positions to the vendor")
-     System_Ext(influx, "InfluxDB 2.x", "Time-series store the owner runs")
+     Person(owner, "Vehicle owner", "Reads their own data")
+     System(client, "trackiwi-client", "Read-only CLI and library")
+     System_Ext(cloud, "trackiwi cloud", "Vendor API")
      System_Ext(grafana, "Grafana", "Portable Flux dashboard")
-     Rel(tracker, cloud, "Reports positions")
+     System_Ext(influx, "InfluxDB 2.x", "Time-series store")
+     System_Ext(tracker, "Vehicle GPS tracker", "Reports to the vendor")
      Rel(owner, client, "Runs commands")
      Rel(client, cloud, "Reads positions", "HTTPS, read-only")
-     Rel(client, influx, "Writes trackiwi_position points", "HTTP")
+     Rel(client, influx, "Writes points", "HTTP")
      Rel(grafana, influx, "Queries", "Flux")
-     Rel(owner, grafana, "Views the dashboard")
+     Rel(owner, grafana, "Views")
+     Rel(tracker, cloud, "Reports positions")
+     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 
 The API is undocumented and can change without notice, so the contract is
 re-checked against the live service by an opt-in test
@@ -51,22 +52,21 @@ State lives in two small files, both created owner-only
    C4Container
      title Containers: trackiwi-client
      Person(owner, "Vehicle owner")
-     System_Boundary(sys, "trackiwi-client") {
-       Container(cli, "trackiwi CLI and library", "Python 3.11+, standard library only", "login, sync, export, heading, influx check and push, ingest, purge")
-       ContainerDb(cache, "Position cache", "SQLite, mode 0600", "positions, mirror_state, tracker_names")
-       ContainerDb(cfg, "Session and target config", "JSON and TOML, mode 0600", "config.json: session. influx.toml: InfluxDB target")
-       Container(sched, "Scheduler", "systemd timer or Docker loop", "Runs trackiwi ingest on an interval")
-     }
+     Container(sched, "Scheduler", "systemd timer or Docker loop", "Runs trackiwi ingest")
      System_Ext(cloud, "trackiwi cloud", "Private API")
+     ContainerDb(cfg, "Session and target config", "JSON, TOML; mode 0600", "config.json, influx.toml")
+     Container(cli, "trackiwi CLI and library", "Python 3.11+, stdlib only", "sync, export, heading, ingest, push")
      System_Ext(influx, "InfluxDB 2.x", "Bucket trackiwi")
+     ContainerDb(cache, "Position cache", "SQLite, mode 0600", "positions, mirror_state, names")
      System_Ext(grafana, "Grafana", "Dashboard")
      Rel(owner, cli, "Runs commands")
      Rel(sched, cli, "Runs ingest")
      Rel(cli, cache, "Reads and writes", "sqlite3")
      Rel(cli, cfg, "Reads", "file")
-     Rel(cli, cloud, "Pulls positions", "HTTPS, bearer token")
-     Rel(cli, influx, "Pushes points", "HTTP, gzip line protocol")
+     Rel(cli, cloud, "Pulls positions", "HTTPS")
+     Rel(cli, influx, "Pushes points", "HTTP")
      Rel(grafana, influx, "Queries", "Flux")
+     UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 
 The cache is the buffer between the two remote systems: ``sync`` fills it,
 ``push`` drains it, and either side can be down without losing a position
@@ -85,14 +85,14 @@ them.
    C4Component
      title Components: the trackiwi package
      Container_Boundary(pkg, "trackiwi package") {
-       Component(cli, "cli", "argparse", "Commands and exit codes; the only orchestrator")
-       Component(client, "client", "urllib", "trackiwi API: login, trackers, paged sync; the session file")
-       Component(store, "store", "sqlite3", "Owner-only cache, mirror position, tracker names")
-       Component(influx, "influx", "urllib", "InfluxDB target config, writer, resumable mirror")
-       Component(lineprotocol, "lineprotocol", "pure", "Cached row to one trackiwi_position line")
-       Component(export, "export", "pure", "GPX, GeoJSON, CSV; one track per tracker")
-       Component(heading, "heading", "pure", "Heading estimate from the last moving fixes")
-       Component(http, "_http", "urllib", "No-redirect opener, send, redact, User-Agent")
+       Component(heading, "heading", "pure", "Heading estimate")
+       Component(cli, "cli", "argparse", "Commands, exit codes")
+       Component(client, "client", "urllib", "trackiwi API, sync")
+       Component(http, "_http", "urllib", "No redirects, send, redact")
+       Component(export, "export", "pure", "GPX, GeoJSON, CSV")
+       Component(store, "store", "sqlite3", "Cache, mirror position")
+       Component(influx, "influx", "urllib", "Writer, resumable mirror")
+       Component(lineprotocol, "lineprotocol", "pure", "Row to line protocol")
      }
      Rel(cli, client, "uses")
      Rel(cli, store, "uses")
@@ -104,6 +104,7 @@ them.
      Rel(influx, lineprotocol, "uses")
      Rel(influx, store, "uses")
      Rel(heading, export, "uses")
+     UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")
 
 Rules the shape encodes:
 
@@ -180,17 +181,18 @@ over the compose network and starts only once InfluxDB is healthy.
      title Deployment: Docker Compose stack
      Deployment_Node(host, "Your machine", "Docker") {
        Deployment_Node(net, "Compose network", "ports bound to 127.0.0.1") {
-         Container(ingest, "ingest", "python:3.13-slim", "Loops: trackiwi ingest, then sleeps")
-         ContainerDb(state, "trackiwi-state", "Docker volume", "Session and position cache")
-         ContainerDb(influx, "influxdb", "influxdb:2.7", "Bucket trackiwi; healthchecked")
-         Container(grafana, "grafana", "Grafana 11", "Provisioned datasource and dashboard")
+         Container(ingest, "ingest", "python:3.13-slim", "Loops trackiwi ingest")
+         ContainerDb(influx, "influxdb", "influxdb:2.7", "Bucket trackiwi")
+         ContainerDb(state, "trackiwi-state", "Docker volume", "Session, position cache")
+         Container(grafana, "grafana", "Grafana 11", "Provisioned dashboard")
        }
      }
      System_Ext(cloud, "trackiwi cloud", "Private API")
-     Rel(ingest, state, "Reads and writes")
+     Rel(ingest, state, "Reads, writes")
      Rel(ingest, cloud, "Pulls positions", "HTTPS")
      Rel(ingest, influx, "Pushes points", "HTTP")
      Rel(grafana, influx, "Queries", "Flux")
+     UpdateLayoutConfig($c4ShapeInRow="2", $c4BoundaryInRow="1")
 
 **Option B: your own InfluxDB** (systemd user timer, ``deploy/systemd/``). The
 command is installed with ``pipx``; the timer runs ``trackiwi ingest``.

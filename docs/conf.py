@@ -35,6 +35,8 @@ extensions = [
 
 # Furo (dev-only docs dependency, pinned in the dev extra) — same theme as open-california.
 html_theme = "furo"
+html_static_path = ["_static"]
+html_css_files = ["diagram-card.css"]
 
 # nitpicky is deliberately OFF. Under `-W` it would promote every unresolved
 # autodoc cross-reference to stdlib types (pathlib.Path, sqlite3.Row,
