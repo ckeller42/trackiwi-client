@@ -32,8 +32,8 @@ extensions = [
     "sphinx.ext.doctest",
 ]
 
-# A built-in theme, so no extra dependency is pulled in.
-html_theme = "alabaster"
+# Furo (dev-only docs dependency, pinned in the dev extra) — same theme as open-california.
+html_theme = "furo"
 
 # nitpicky is deliberately OFF. Under `-W` it would promote every unresolved
 # autodoc cross-reference to stdlib types (pathlib.Path, sqlite3.Row,

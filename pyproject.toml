@@ -28,6 +28,7 @@ dev = [
     "detect-secrets>=1.5",
     "sphinx>=8,<10",
     "sphinx-needs==8.5.0",
+    "furo==2025.12.19",
     "interrogate>=1.7",
     # Pinned exactly: strict mode's finding set is version-sensitive (new checks
     # land in minor releases), so a pin keeps the type gate reproducible — same
