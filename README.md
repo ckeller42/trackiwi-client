@@ -3,15 +3,17 @@
 [![CI](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml/badge.svg)](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/ckeller42/trackiwi-client)](https://github.com/ckeller42/trackiwi-client/releases)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://ckeller42.github.io/trackiwi-client/)
-![Python](https://img.shields.io/badge/python-3.11%2B-blue)
-![Dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)
-![mypy](https://img.shields.io/badge/mypy-strict-blue)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/ckeller42/trackiwi-client/blob/main/pyproject.toml)
+[![Dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)](https://github.com/ckeller42/trackiwi-client/blob/main/pyproject.toml)
+[![mypy](https://img.shields.io/badge/mypy-strict-blue)](https://mypy.readthedocs.io/en/stable/command_line.html#cmdoption-mypy-strict)
 [![Ruff](https://img.shields.io/badge/code%20style-ruff-informational)](https://docs.astral.sh/ruff/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](https://github.com/ckeller42/trackiwi-client/blob/main/LICENSE)
 
 Read-only Python client for pulling positions out of a personal
 [trackiwi](https://www.trackiwi.com) account: sync them into a local SQLite
 cache, export them as GPX, GeoJSON or CSV.
+
+📖 **Documentation:** [requirements, traceability and API reference](https://ckeller42.github.io/trackiwi-client/) (GitHub Pages).
 
 Unofficial and unaffiliated. trackiwi publishes no API; this talks to the
 private API its own app uses, which can change without notice.
