@@ -18,7 +18,7 @@ fails the build under ``-W``, which catches a typo'd requirement ID.
 .. automodule:: trackiwi.client
    :members:
    :undoc-members:
-   :private-members: _redact, _check, _require_https, _coerce
+   :private-members: _check, _require_https, _coerce
 
 ``trackiwi.store``
 ------------------
@@ -34,7 +34,7 @@ fails the build under ``-W``, which catches a typo'd requirement ID.
 .. automodule:: trackiwi.export
    :members:
    :undoc-members:
-   :private-members: _by_tracker, _finite
+   :private-members: _finite
 
 ``trackiwi.heading``
 --------------------
