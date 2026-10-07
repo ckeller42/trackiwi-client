@@ -1,7 +1,12 @@
 # trackiwi-client
 
 [![CI](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml/badge.svg)](https://github.com/ckeller42/trackiwi-client/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/ckeller42/trackiwi-client)](https://github.com/ckeller42/trackiwi-client/releases)
+[![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://ckeller42.github.io/trackiwi-client/)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
+![Dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)
+![mypy](https://img.shields.io/badge/mypy-strict-blue)
+[![Ruff](https://img.shields.io/badge/code%20style-ruff-informational)](https://docs.astral.sh/ruff/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Read-only Python client for pulling positions out of a personal
