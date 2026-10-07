@@ -54,9 +54,9 @@ def test_newline_in_tag_value_becomes_space():
     assert "\n" not in line
 
 
-def test_missing_or_empty_name_falls_back_to_tracker_id():
-    assert ",tracker_name=7 " in format_point(_row(), None)
-    assert ",tracker_name=7 " in format_point(_row(), "")
+def test_an_empty_name_is_rejected():
+    with pytest.raises(ValueError, match="tracker_name"):
+        format_point(_row(), "")
 
 
 def test_null_optional_columns_are_omitted():

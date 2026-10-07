@@ -24,15 +24,11 @@ GNSS quality scale; ``fix_timezone`` is a 0/1 flag, not a timezone).
 from __future__ import annotations
 
 import math
-from typing import Any, Protocol
+from typing import Any
+
+from . import Row
 
 MEASUREMENT = "trackiwi_position"
-
-
-class Row(Protocol):
-    """Anything indexable by column name: a ``sqlite3.Row`` or a ``dict``."""
-
-    def __getitem__(self, key: str, /) -> Any: ...
 
 
 #: (field name, source column, divisor or None, "f" for float or "i" for integer)
@@ -70,19 +66,19 @@ def _format_field(value: Any, kind: str, divisor: float | None) -> str:
     return repr(number)
 
 
-def format_point(row: Row, tracker_name: str | None) -> str:
+def format_point(row: Row, tracker_name: str) -> str:
     """Return one line-protocol line for a cached position row.
 
-    `tracker_name` becomes the ``tracker_name`` tag; when it is missing or
-    empty the tracker id is used instead, because InfluxDB rejects an empty
-    tag value. That fallback exists for direct library use only: `mirror`
-    never sends a row without a stored name (:need:`REQ_MIRROR_IDEMPOTENT`).
-    NULL optional columns are omitted rather than written.
-    Raises ``ValueError`` for a non-finite value.
+    `tracker_name` becomes the ``tracker_name`` tag and must not be empty
+    (InfluxDB rejects an empty tag value; `mirror` never sends an unnamed
+    tracker, :need:`REQ_MIRROR_IDEMPOTENT`). NULL optional columns are omitted
+    rather than written. Raises ``ValueError`` for an empty name or a
+    non-finite value.
     """
+    if not tracker_name:
+        raise ValueError("tracker_name must not be empty")
     tracker_id = int(row["tracker_id"])
-    name = tracker_name if tracker_name else str(tracker_id)
-    tags = f"tracker_id={tracker_id},tracker_name={_escape_tag(name)}"
+    tags = f"tracker_id={tracker_id},tracker_name={_escape_tag(tracker_name)}"
     fields = []
     for field, column, divisor, kind in _FIELDS:
         value = row[column]
