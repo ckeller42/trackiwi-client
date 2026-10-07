@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }    # the gitleaks history scan needs every commit
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
@@ -37,6 +38,9 @@ jobs:
       # --all-files; this manual-stage twin scans the checked-out tree.
       - name: gitleaks (working tree)
         run: pre-commit run --hook-stage manual gitleaks-dir --all-files
+      # A secret deleted from the tree is still in history, and the repo is public.
+      - name: gitleaks (full history)
+        run: pre-commit run --hook-stage manual gitleaks-history --all-files
 
   test:
     runs-on: ubuntu-latest
