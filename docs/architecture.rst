@@ -329,7 +329,7 @@ Crosscutting concepts
 -  **Time.** Every timestamp is epoch seconds UTC after parsing; ``normalize_epoch`` takes the sync
    CSV integer, ``epoch_from_iso`` takes the ISO string of the trackers endpoint, and they are kept
    apart on purpose. :need:`REQ_FIX_AT_SECONDS`. Units of the other fields are in
-   {doc}\ ``reference/units``.
+   :doc:`reference/units`.
 -  **Read-only commands never create the cache.** ``export``, ``heading`` and ``purge`` touch the
    database only if it exists; ``purge`` deletes without opening it. :need:`REQ_PURGE_DELETES`,
    :need:`REQ_PURGE_NOT_ON_LOCK`
