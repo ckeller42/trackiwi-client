@@ -3,8 +3,8 @@
 Canonical rules for anyone — human or agent — working in this repository.
 `CLAUDE.md` is a one-line `@AGENTS.md` import so Claude Code loads this file.
 
-Unofficial read-only client for the trackiwi GPS API. Spec:
-`docs/superpowers/specs/2026-09-17-trackiwi-client-design.md`. Each rule below
+Unofficial read-only client for the trackiwi GPS API. Design spec:
+`docs/superpowers/specs/2026-09-17-trackiwi-client-design.md` (local-only, gitignored). Each rule below
 names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
 
 ## Rules
