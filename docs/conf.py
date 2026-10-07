@@ -27,6 +27,8 @@ project_copyright = "2026, Christoph Keller"
 
 extensions = [
     "sphinx_needs",
+    "sphinxcontrib.mermaid",
+    "sphinx_likec4",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.doctest",
@@ -34,6 +36,8 @@ extensions = [
 
 # Furo (dev-only docs dependency, pinned in the dev extra) — same theme as open-california.
 html_theme = "furo"
+html_static_path = ["_static"]
+html_css_files = ["diagram-card.css"]
 
 # nitpicky is deliberately OFF. Under `-W` it would promote every unresolved
 # autodoc cross-reference to stdlib types (pathlib.Path, sqlite3.Row,
@@ -74,3 +78,5 @@ needs_warnings = {
 # Always evaluate the warning rules and log which needs failed, even on a build
 # with no other needs warnings — otherwise the check can be skipped silently.
 needs_warnings_always_warn = True
+
+likec4_source_dir = "model"
