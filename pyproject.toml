@@ -32,6 +32,9 @@ dev = [
     "sphinxcontrib-mermaid==2.1.1",
     "sphinx-likec4==0.2.1",
     "furo==2025.12.19",
+    # Docs-only, pinned exactly like sphinx-needs: the Markdown pages and the
+    # Mermaid directive of the docs site. Not runtime dependencies.
+    "myst-parser==5.1.0",
     "interrogate>=1.7",
     # Pinned exactly: strict mode's finding set is version-sensitive (new checks
     # land in minor releases), so a pin keeps the type gate reproducible — same

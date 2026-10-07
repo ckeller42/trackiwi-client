@@ -13,7 +13,7 @@ Read-only Python client for pulling positions out of a personal
 [trackiwi](https://www.trackiwi.com) account: sync them into a local SQLite
 cache, export them as GPX, GeoJSON or CSV.
 
-📖 **Documentation:** [requirements, traceability and API reference](https://ckeller42.github.io/trackiwi-client/) (GitHub Pages).
+📖 **Documentation:** <https://ckeller42.github.io/trackiwi-client/> — getting started, how-to guides, CLI and unit reference, the architecture, and the requirements traced to their tests.
 
 Unofficial and unaffiliated. trackiwi publishes no API; this talks to the
 private API its own app uses, which can change without notice.
@@ -115,7 +115,7 @@ it cannot create or revoke one.
 Timestamps in these listings are printed exactly as the API sends them, which
 for these endpoints is an ISO 8601 string — *not* the epoch integer the
 position sync uses. Both forms occur in this API and mean the same kind of
-thing; see the units note below.
+thing; see [Field units](#field-units).
 
 ### Which way is the vehicle pointing?
 
@@ -154,22 +154,10 @@ available as `trackiwi.heading.estimate_heading()` for library use.
 
 ### Field units
 
-Worth knowing before you do arithmetic on an export, because the field names
-do not say it and the vendor documents nothing:
-
-- **`distance` is centimetres**, and it is a **per-fix delta, not an
-  odometer**. It is reported by the device from its own consecutive readings,
-  so it can disagree slightly with the distance you would compute from two
-  stored coordinates when a fix was dropped or GPS jittered.
-- **`voltage` is centivolts** — `1303` means 13.03 V.
-- **`fix_timezone` is an integer offset**, not a zone name. Its exact
-  interpretation is unconfirmed; nothing in this tool depends on it, because
-  every timestamp is handled and exported in UTC.
-- **`speed` is km/h, `altitude` is metres, `course` is degrees** clockwise
-  from true north. Verified against recorded drives: reported speed is 3.6×
-  the speed derived from consecutive positions, and the course matches the
-  bearing between fixes. The InfluxDB fields are named accordingly
-  (`speed_kmh`, `altitude_m`, `course_deg`).
+The field names do not say what unit they use, and the vendor documents nothing. Read the
+[position fields and units](https://ckeller42.github.io/trackiwi-client/reference/units.html)
+reference before doing arithmetic on an export. The two traps: `distance` is centimetres and a
+per-fix delta, not an odometer, and `voltage` is centivolts.
 
 `--from`/`--to` are inclusive UTC calendar days (`YYYY-MM-DD`); giving a `--to`
 before `--from` is rejected with an error rather than silently returning
@@ -495,8 +483,9 @@ Test fixtures are synthetic: invented coordinates, invented IDs.
 Every project requirement is a first-class `sphinx-needs` object under `docs/`
 (`docs/requirements.rst`), each traced to the test(s) that verify it
 (`docs/traceability.rst`). The docs build **fails** if any requirement has no
-verifying test, so it runs as a CI gate — only its GitHub Pages hosting is
-deferred until the repo is public. Build it locally with:
+verifying test, so it runs as a CI gate, and the same build is the
+[documentation site](https://ckeller42.github.io/trackiwi-client/) on GitHub Pages.
+Build it locally with:
 
 ```bash
 .venv/bin/sphinx-build -b html -W docs docs/_build/html
