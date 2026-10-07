@@ -5,7 +5,8 @@ on:
   pull_request:
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true          # read-only jobs only
+  # Cancel superseded PR runs only; a push to main always runs to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions: { contents: read }
 jobs:
   # Version-independent gates run ONCE, on the target version — not across the matrix.
@@ -21,9 +22,12 @@ jobs:
   # markdownlint-cli2, detect-secrets), so there are no separate lint jobs.
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }    # the gitleaks history scan needs every commit
+        with:
+          fetch-depth: 0            # the gitleaks history scan needs every commit
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
@@ -44,12 +48,14 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python: ["3.11", "3.12", "3.13"]    # floor from requires-python .. the buspi target
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "${{ matrix.python }}", cache: pip }
       - run: pip install -e ".[dev]"
@@ -64,8 +70,10 @@ jobs:
   # keeps the checked semantics at the 3.11 floor regardless of the runner.
   typecheck:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
@@ -82,9 +90,11 @@ jobs:
   # repo is public; the build itself gates every push and PR now.
   docs:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions: { contents: read }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with: { python-version: "3.13", cache: pip }
       - run: pip install -e ".[dev]"
@@ -94,3 +104,23 @@ jobs:
         run: sphinx-build -b html -W docs docs/_build/html
       - name: Docstring coverage (interrogate)
         run: interrogate trackiwi
+
+  # Packaging smoke test (NOT a required check): the sdist/wheel build, the
+  # metadata check, and a clean-venv install of the wheel that runs the console
+  # script. Tooling is installed inline so the [dev] extra stays unchanged.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with: { python-version: "3.13" }
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Install the wheel into a clean venv and run the entry point
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-venv"
+          "$RUNNER_TEMP/wheel-venv/bin/pip" install dist/*.whl
+          "$RUNNER_TEMP/wheel-venv/bin/trackiwi" --help

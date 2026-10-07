@@ -1,44 +1,29 @@
 # Operations
 
-Repo and CI setup, moved out of `AGENTS.md` unchanged.
+Repo and CI setup, moved out of `AGENTS.md`. Anything this page cannot know from the
+repository's own files is marked **verify in repo settings**.
 
 ## Repo / CI setup
 
-- GitHub: `ckeller42/trackiwi-client`, **private**. The GitHub *Pages hosting*
-  of the docs is deferred until the repo is made public (Pages on a private
-  repo needs a paid plan). **Sphinx itself is not deferred** — the
-  `sphinx-needs` requirements-traceability build runs in CI now; only the
-  public hosting of its output waits. The project is **MIT-licensed**
-  (`LICENSE` at the repo root, wired into `pyproject.toml` via
-  `license = "MIT"` / `license-files`, with the badge in the README).
-- **Public-flip checklist** (do these the moment the repo goes public or the
-  plan changes — one place so it is a checklist, not a rediscovery):
-  1. Enable the branch-protection ruleset (payload already below in this
-     section — apply it verbatim).
-  2. Enable GitHub Pages to **publish** the Sphinx docs (the build already runs
-     in CI; only hosting was blocked).
-  3. Enable GitHub-native secret scanning + push protection if the plan allows
-     — it complements the `detect-secrets` hook and the local guard.
-  (The MIT `LICENSE` and its badge are already in place, so they are no longer
-  on this checklist.)
-- Branch protection on `main`: **NOT active, and cannot be.** Both APIs that
-  could enforce it were tried and both return the same thing on a private
-  repo on the free plan:
-
-  ```text
-  Upgrade to GitHub Pro or make this repository public to enable this
-  feature. (HTTP 403)
-  ```
-
-  That is `PUT /repos/{o}/{r}/branches/main/protection` (legacy branch
-  protection) **and** `POST /repos/{o}/{r}/rulesets` (the newer rulesets
-  API). **Do not spend time retrying either** — the gate is the plan, not the
-  payload. The owner's decision (2026-09-17) is to keep the repo private and
-  treat the workflow as convention.
-- **User requirement, currently unenforceable: a PR must not be merged while
-  any comment thread is unresolved.** Honour this by hand on every PR. It is
-  `required_review_thread_resolution` below, and it switches on by itself the
-  moment the repo goes public or the plan changes — at which point run:
+- GitHub: `ckeller42/trackiwi-client`, **public**, MIT-licensed (`LICENSE` at the
+  repo root, wired into `pyproject.toml` via `license = "MIT"` / `license-files`,
+  with the badge in the README).
+- **Docs hosting is live.** `pages.yml` builds the Sphinx site
+  (`sphinx-build -b html -W docs docs/_build/html`) on every push to `main` (and on
+  manual dispatch) and deploys it with `actions/deploy-pages`; the README links
+  the result at <https://ckeller42.github.io/trackiwi-client/>. It needs Pages
+  set to "GitHub Actions" as the source (**verify in repo settings**). The same
+  `-W` build also gates every PR through the `docs` job in `ci.yml`.
+- **Branch ruleset on `main` is active** (AGENTS.md, "Workflow"): a PR is required,
+  conversations must be resolved, and these checks must pass with the branch up
+  to date. The names are load-bearing; do not rename the workflow (`CI`) or its jobs:
+  `pre-commit`, `test (3.11)`, `test (3.12)`, `test (3.13)`, `typecheck`, `docs`.
+  Never add a `name:` to the matrix job (it would change `test (3.x)`) and keep the
+  matrix values strings. The `build` job (packaging smoke test) and the Claude jobs
+  are **not** required.
+- The repo's reference ruleset payload is kept below so it can be re-applied or
+  compared. Whether the live ruleset still matches it exactly is **verify in repo
+  settings** (Settings, Rules, Rulesets).
 
   ```bash
   gh api repos/ckeller42/trackiwi-client/rulesets -X POST --input - <<'JSON'
@@ -78,6 +63,29 @@ Repo and CI setup, moved out of `AGENTS.md` unchanged.
   out of merging entirely; and `bypass_actors: []`, which is the rulesets
   equivalent of `enforce_admins: true` — without it the owner can push straight
   past the rule, which defeats the point.
+- GitHub-native secret scanning and push protection: **verify in repo settings**
+  (they complement the three scanners below).
+- **Workflow conventions** (every workflow, enforced by review and by `zizmor`):
+  top-level `permissions` of `contents: read` or `{}` with wider scopes only on the
+  job that needs them; `persist-credentials: false` on every checkout; a
+  `timeout-minutes` on every job; every `uses:` pinned to a full commit SHA with a
+  `# vX.Y.Z` comment. `ci.yml` cancels superseded runs on pull requests only, so a
+  push to `main` always runs to completion.
+- **Workflow linting** runs inside the existing `pre-commit` job: `actionlint` and
+  `zizmor` (offline audits only; the hook has no token). The one deliberate
+  `zizmor` exception is the `workflow_run` trigger in `dependabot-auto-merge.yml`,
+  annotated in place with its reason.
+- **Dependabot** (`.github/dependabot.yml`): weekly, with a 7-day cooldown for
+  version updates (security updates ignore it). github-actions, pip and pre-commit
+  updates are grouped by minor/patch; majors stay one PR each. `ruff` is pinned in
+  both `pyproject.toml` and `.pre-commit-config.yaml` and the two must match, so
+  both bumps share one cross-ecosystem `ruff` group (a single PR). That grouping
+  uses Dependabot's `multi-ecosystem-groups`; check the first such PR actually
+  carries both files.
+- **Packaging smoke test:** the `build` job in `ci.yml` runs `python -m build`,
+  `twine check --strict dist/*`, installs the wheel into a clean venv and runs
+  `trackiwi --help`. Releases themselves are manual (tag the merge commit, create
+  a GitHub release; see AGENTS.md).
 - **The Claude review job (`claude-code-review.yml`) fails on a silent
   non-review, by design.** Its last step reads the action's `execution_file`
   and exits 1 when the result carries any `permission_denials` (printing the
@@ -112,7 +120,9 @@ Repo and CI setup, moved out of `AGENTS.md` unchanged.
   `.coderabbit.yaml` only configures it once installed.
 - Dependabot auto-merge is `workflow_run`-triggered, so it only runs after CI
   already passed for that exact commit. It merges **minor/patch only**; majors
-  are left for manual review. It deliberately does not rely on the repo's
+  are left for manual review (it reads the `update-type` trailer of every
+  dependency in the PR's commits, so a grouped PR is merged only if none of its
+  members is a major). It deliberately does not rely on the repo's
   "Allow auto-merge" setting — do not enable that toggle expecting it to help.
 - **CI's `pre-commit` job runs `pre-commit run --all-files`, never a bare `ruff`
   call.** Two reasons, both learned the hard way: the `ruff-format` hook is

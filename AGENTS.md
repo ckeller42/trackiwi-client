@@ -153,7 +153,7 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
 
 ## Repo / CI setup
 
-Moved to `docs/ops.md` (branch protection, public-flip checklist, review-job
+Moved to `docs/ops.md` (branch ruleset, Pages, workflow conventions, review-job
 and CodeRabbit/Dependabot notes).
 
 ## Offset semantics in `sync`

@@ -1,12 +1,14 @@
 name: Dependabot auto-merge
 on:
+  # zizmor: ignore[dangerous-triggers] -- deliberate. The job never checks out or
+  # runs PR code: it only reads PR metadata through the API and merges Dependabot's
+  # own PR, pinned to the commit CI validated (--match-head-commit), and only
+  # after CI succeeded. No untrusted input reaches a shell (all values go via env).
   workflow_run:
     workflows: [CI]
     types: [completed]
 
-permissions:
-  contents: write
-  pull-requests: write
+permissions: {}
 
 # Serialize merges so several CI runs completing together don't race each other
 # into a now-conflicting PR. `queue: max` keeps every pending run — the default
@@ -24,6 +26,11 @@ jobs:
     # required-checks, so it needs no repo settings to be correct.
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Write access is scoped to this job only (merge needs both).
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Resolve PR and check eligibility
         id: check
