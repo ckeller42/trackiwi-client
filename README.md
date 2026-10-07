@@ -13,31 +13,46 @@ private API its own app uses, which can change without notice.
 
 ## Install
 
-`python3` on macOS is 3.9; this needs 3.11+. If you installed Python via
-MacPorts, use its interpreter directly. The recommended path is a virtualenv:
+Needs Python 3.11 or newer and nothing else: there are no runtime
+dependencies. Check with `python3 --version`; the system Python on some
+systems (older macOS, for one) is too old, in which case install a newer one
+and use it explicitly (for example `python3.13`).
 
 ```bash
-/opt/local/bin/python3.13 -m venv .venv
+# Recommended: an isolated `trackiwi` command on your PATH
+pipx install git+https://github.com/ckeller42/trackiwi-client
+
+# A fixed release instead of the latest main
+pipx install git+https://github.com/ckeller42/trackiwi-client@v0.2.0
+
+# Or from a clone, in a virtualenv
+python3 -m venv .venv
 .venv/bin/pip install .
 ```
-
-There are zero runtime dependencies, so nothing is downloaded to resolve — the
-client is standard library only.
 
 ### Run without installing
 
 Because there is nothing to install, you can skip the step above and run the
-tool straight from a clone — this is the low-friction path:
+tool straight from a clone, which is the lowest-friction path:
 
 ```bash
-python3.13 -m trackiwi --help          # run from the clone directory
-python3.13 -m trackiwi trackers
+python3 -m trackiwi --help             # run from the clone directory
+python3 -m trackiwi trackers
 ```
 
 `python -m trackiwi` behaves exactly like the installed `trackiwi` command.
 
-If you want an isolated `trackiwi` on your `PATH` without managing the venv
-yourself, `pipx install .` works too.
+### Update and uninstall
+
+```bash
+pipx upgrade trackiwi                  # or reinstall with the command above
+pipx uninstall trackiwi
+```
+
+The package version is `trackiwi.__version__` (`pip show trackiwi`). Your data
+stays on disk after an uninstall: run `trackiwi logout` first (it revokes the
+session) and `trackiwi purge --yes` to delete the position cache. The session
+file lives in `~/.config/trackiwi/`, the cache in `~/.local/share/trackiwi/`.
 
 ## Use
 

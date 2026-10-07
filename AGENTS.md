@@ -82,8 +82,9 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
 
 ## Workflow
 
-- Branch, then PR into `main` (by convention; branch protection is unavailable
-  on the free private plan). Do not merge past unresolved review threads.
+- Branch, then PR into `main`. A repo ruleset enforces it: PR required,
+  conversations resolved, and `pre-commit` plus `test (3.11/3.12/3.13)` green,
+  with the branch up to date (`gh pr update-branch <n>` when it is not).
   Commit prefixes: `feat:`, `fix:`, `docs:`, `test:`, `chore:`.
 - Local gate: `./tools/ci.sh` (pre-commit incl. gitleaks working-tree scan,
   strict mypy, pytest with coverage, doctests, `sphinx-build -W`, `interrogate`).
@@ -104,6 +105,14 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   `detect-secrets` (`.secrets.baseline`, regenerate and audit before committing)
   and `SECRET_RE` in `tools/check_no_private_data.py`. Keep all three.
 - `python -m trackiwi …` runs straight from a clone.
+- **Releasing:** the version has one source, `trackiwi/__init__.py`
+  (`pyproject.toml` reads it). Bump it in a PR; after merge tag the merge
+  commit `vX.Y.Z` and create a GitHub release. Deployment steps for a specific
+  machine live in the repo that deploys it, never here
+  (`REQ_PORTABLE_CONFIG`).
+- **Agents installing it for a user:** `pipx install
+  git+https://github.com/ckeller42/trackiwi-client@vX.Y.Z`, then `trackiwi login`
+  (the user types the password; never ask for it) and `trackiwi sync`.
 
 ## Gotchas
 

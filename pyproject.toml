@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trackiwi"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Read-only client for a personal trackiwi GPS account"
 requires-python = ">=3.11"
 license = "MIT"
@@ -38,6 +38,9 @@ dev = [
 
 [project.scripts]
 trackiwi = "trackiwi.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "trackiwi.__version__" }   # the one place the version lives
 
 [tool.setuptools.packages.find]
 include = ["trackiwi*"]
