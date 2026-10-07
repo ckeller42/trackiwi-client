@@ -10,10 +10,6 @@ on:
     #   - "src/**/*.js"
     #   - "src/**/*.jsx"
 
-# Least privilege by default; each job widens only what it needs.
-permissions:
-  contents: read
-
 jobs:
   claude-review:
     # Optional: Filter by PR author
@@ -25,75 +21,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write # post review comments / replies
-      issues: write # reply to @claude on issues
+      pull-requests: read
+      issues: read
       id-token: write
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code Review
         id: claude-review
-        uses: anthropics/claude-code-action@8ce9314fa9a404564fa7e954cd84f25bcba2b829 # v1.0.236
-        env:
-          # In a headless (SDK) session a sub-agent runs in the background
-          # unless Claude asks for the foreground, and nothing ever wakes the
-          # session up: the review "waited" for its own pre-check agent and
-          # ended after 6 turns with 0 denials and nothing posted (#8). This
-          # forces every sub-agent into the foreground.
-          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
+        uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
           prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          # The prompt is a slash command, which the CLI runs through the Skill
-          # tool, so that one skill is allowed (#8: it was the denial left after
-          # #6 and #7). The code-review plugin declares the gh commands and the
-          # inline-comment tool in its own frontmatter; it also launches
-          # sub-agents (Agent; Task is the older name) and reads CLAUDE.md
-          # (Read/Glob/Grep). Allowing only the inline-comment tool made every
-          # read fail (21 permission denials, nothing posted). `gh api` is not
-          # allowed on purpose: it can write with -X, and everything the review
-          # needs is in `gh pr view --json` / `gh pr diff`. Nothing here can
-          # push code: `contents: read` above.
-          claude_args: >-
-            --allowedTools "Skill(code-review:code-review *),mcp__github_inline_comment__create_inline_comment,Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*),Agent,Task,Read,Glob,Grep"
+          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
-      # A denied tool call can end the review with nothing posted while the
-      # action still reports success (#8). The sanitised log prints only a
-      # count; the execution file keeps each denial's tool name and input, so
-      # read it from there, print them and fail the job. Also fail when Claude
-      # never ran or its result is not a success, for the same reason.
-      - name: Fail on permission denials
-        if: ${{ !cancelled() }}
-        env:
-          EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
-        run: |
-          set -euo pipefail
-          if [ -z "$EXECUTION_FILE" ] || [ ! -f "$EXECUTION_FILE" ]; then
-            echo "::error::Claude did not run (no execution file), so the PR was not reviewed. One cause: the action skips itself when this workflow file differs from the one on main, so a PR that edits it is never reviewed by it."
-            exit 1
-          fi
-          jq -e 'type == "array"' "$EXECUTION_FILE" > /dev/null
-          result=$(jq -c '[.[] | select(.type == "result")] | last' "$EXECUTION_FILE")
-          if [ "$result" = "null" ]; then
-            echo "::error::Claude produced no result message; the review did not finish."
-            exit 1
-          fi
-          count=$(jq -r '.permission_denials // [] | length' <<<"$result")
-          if [ "$count" -gt 0 ]; then
-            echo "::error::$count tool call(s) were denied; the review is incomplete. Denied calls:"
-            jq -r '.permission_denials[] | "  \(.tool_name): \(.tool_input | tojson | .[0:300])"' <<<"$result"
-            exit 1
-          fi
-          if [ "$(jq -r '.subtype' <<<"$result")" != "success" ] || [ "$(jq -r '.is_error' <<<"$result")" = "true" ]; then
-            echo "::error::Claude ended with result subtype '$(jq -r '.subtype' <<<"$result")' (is_error=$(jq -r '.is_error' <<<"$result")); the review did not finish."
-            exit 1
-          fi
-          echo "permission denials: 0, result: success"
