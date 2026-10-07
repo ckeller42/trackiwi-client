@@ -12,6 +12,7 @@ from trackiwi.cli import build_parser, main
 
 # `(argv command, Client method, a synthetic record, substrings that must show)`
 CASES = [
+    ("trackers", "trackers", {"id": 7, "name": "Invented bus"}, ["7", "Invented bus"]),
     (
         "tours",
         "tours",
@@ -115,6 +116,15 @@ def test_a_read_command_survives_a_record_missing_every_field(
 def test_a_read_command_needs_authentication(command, method, record, expected, capsys):
     assert main([command]) == 2
     assert "login" in capsys.readouterr().err
+
+
+def test_trackers_cells_are_sanitised_and_non_dicts_degrade(capsys, monkeypatch):
+    """A tab or newline in a tracker name must not shift columns, and an
+    element that is not a record prints as a single cell."""
+    records = [{"id": 7, "name": "a\tb\nc"}, "odd"]
+    monkeypatch.setattr("trackiwi.cli.Client", stub_client("trackers", records))
+    assert main(["trackers"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["7\ta b c", "odd"]
 
 
 def test_the_alarms_help_warns_that_the_list_is_a_location_history():

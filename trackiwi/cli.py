@@ -169,13 +169,6 @@ def cmd_logout(_: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_trackers(_: argparse.Namespace) -> int:
-    """Print each tracker's id and name, one per line."""
-    for tracker in Client.load().trackers():
-        print(f"{tracker.get('id')}\t{tracker.get('name', '(unnamed)')}")
-    return 0
-
-
 def _cell(value: object) -> str:
     """Render one field for a tab-separated listing.
 
@@ -233,6 +226,7 @@ def _read_command(method: str, fields: tuple[str, ...]) -> Callable[[argparse.Na
 #: exists for positions only; adding tables for them would widen the most
 #: sensitive artefact this tool creates (design spec, section 7.1) for no gain.
 READ_COMMANDS = (
+    ("trackers", "trackers", ("id", "name"), "list trackers"),
     (
         "tours",
         "tours",
@@ -267,6 +261,14 @@ READ_COMMANDS = (
 
 #: Longer `--help` text, where a warning has room to be read.
 READ_DESCRIPTIONS = {
+    "trackers": (
+        "List the account's trackers, one per line: id and name.\n\n"
+        "PRIVACY WARNING: a tracker record holds location data: the alarm "
+        "geofence (latitude, longitude, radius, usually where the vehicle is "
+        "kept) and the latest fix. This command prints only id and name, but "
+        "the underlying API response holds the rest, so treat it with the same "
+        "care as the position cache."
+    ),
     "alarms": (
         "List the account's alarms, one per line: id, tracker, type, "
         "whether it was acknowledged, and when it was recorded.\n\n"
@@ -574,7 +576,6 @@ def build_parser() -> argparse.ArgumentParser:
     login.set_defaults(func=cmd_login)
 
     sub.add_parser("logout", help="revoke the session").set_defaults(func=cmd_logout)
-    sub.add_parser("trackers", help="list trackers").set_defaults(func=cmd_trackers)
 
     for name, method, fields, help_text in READ_COMMANDS:
         read = sub.add_parser(

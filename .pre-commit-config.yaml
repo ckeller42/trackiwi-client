@@ -70,7 +70,7 @@ repos:
       # "Gotchas": the system python3 may be too old), like tools/ci.sh.
       - id: mypy
         name: mypy (strict)
-        entry: .venv/bin/mypy
+        entry: bash -c '.venv/bin/mypy && .venv/bin/mypy --allow-untyped-defs --allow-untyped-calls --allow-incomplete-defs --allow-untyped-decorators tests'
         language: system
         pass_filenames: false
         always_run: true

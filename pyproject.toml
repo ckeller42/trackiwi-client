@@ -95,45 +95,7 @@ strict = true
 warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
-files = ["trackiwi", "tools", "tests"]
-
-[[tool.mypy.overrides]]
-# Test functions are conventionally left unannotated (a `def test_x():` returns
-# nothing meaningful and pytest never inspects the annotation), and the fixtures
-# they call are equally untyped, so the "must be annotated" family and the
-# "calling an untyped function" check are relaxed for tests only. Every other
-# strict check — real type errors in test bodies, bad calls into the package,
-# unreachable code, redundant casts — still applies, so the tests are genuinely
-# type-checked. `tests/` has no `__init__.py` (a deliberate choice for pytest's
-# prepend import mode), so its files are top-level modules — `test_check...`,
-# `conftest` — not `tests.*`, and mypy only accepts a `*` as a whole path
-# component, so the modules are listed by name. A new test file must be added
-# here to inherit the relaxation; until then strict applies and mypy says so.
-module = [
-    "conftest",
-    "test_check_no_private_data",
-    "test_cli",
-    "test_cli_influx",
-    "test_cli_reads",
-    "test_dashboard",
-    "test_client_auth",
-    "test_client_reads",
-    "test_client_sync",
-    "test_deploy",
-    "test_export",
-    "test_heading",
-    "test_influx_config",
-    "test_influx_mirror",
-    "test_influx_writer",
-    "test_invariants",
-    "test_lineprotocol",
-    "test_live",
-    "test_main_module",
-    "test_parse",
-    "test_store",
-    "test_store_mirror",
-]
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
-disallow_untyped_decorators = false
-disallow_untyped_calls = false
+# Tests are checked by a second, relaxed run (flags in tools/ci.sh and CI): test
+# functions are left unannotated, so only the "must be annotated" family is off.
+files = ["trackiwi", "tools"]
+mypy_path = "tools"   # tests import the guard script as a module
