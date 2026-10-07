@@ -336,8 +336,6 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
 - `pre-commit run --all-files` (and so `./tools/ci.sh`) only checks git-tracked
   files: a new file gets a false green until it is `git add`-ed. Stage new files
   before running the gate.
-- A **new test module** must be added to the `[[tool.mypy.overrides]]` `module`
-  list in `pyproject.toml`, or strict mypy rejects its unannotated test functions.
 - `*.json` is git-ignored (a GeoJSON export named `.json` must never be
   committed); the dashboard is re-included by `!deploy/grafana-dashboards/*.json`.
 - Grafana Flux queries use `"${bucket}"` / `"${tracker}"` for dashboard
