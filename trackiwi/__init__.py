@@ -8,6 +8,8 @@ bounded by :need:`REQ_INFLUX_WRITE_SCOPE`) and :need:`REQ_NO_PRIVATE_DATA`
 objects under ``docs/``; see ``docs/requirements.rst``.
 """
 
+from typing import Any, Protocol
+
 __version__ = "0.1.0"
 
 
@@ -40,3 +42,13 @@ COLUMNS = (
     "battery",
     "voltage",
 )
+
+
+class Row(Protocol):
+    """A position row addressed by column name: a `sqlite3.Row` or a `dict`.
+
+    Values are `Any` because the cache stores heterogeneous columns (ints,
+    floats, `None`).
+    """
+
+    def __getitem__(self, key: str, /) -> Any: ...

@@ -15,7 +15,6 @@ import contextlib
 import gzip
 import json
 import os
-import re
 import sys
 import tomllib
 import urllib.parse
@@ -71,8 +70,7 @@ def _read_file(path: Path) -> dict[str, Any]:
     """Read the TOML file, narrowing a widened mode first (REQ_CONFIG_MODE_0600)."""
     if not path.exists():
         return {}
-    # A config widened by a restore or a copy is narrowed back, mirroring the
-    # trackiwi session file. Failing to chmod must not stop the load.
+    # Narrow a widened mode, as for the session file; a chmod failure is ignored.
     with contextlib.suppress(OSError):
         os.chmod(path, 0o600)
     try:
@@ -155,36 +153,24 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
 WRITE_TIMEOUT = 60
 _RETENTION_DROP = b"beyond retention policy"
-_AUTH_RE = re.compile(r"\b(Token|Bearer|Basic)\s+\S+", re.IGNORECASE)
 
 
 class InfluxWriter:
     """Talks to one InfluxDB target: detect the version, write, check.
 
-    Implements :need:`REQ_INFLUX_WRITE_SCOPE` (the only writes are POSTs of
-    line protocol to the configured target's write endpoint) and
-    :need:`REQ_INFLUX_TOKEN_REDACT` (credentials are scrubbed from every
-    message built from server-controlled text). Redirects are never
-    followed, so a 3xx is an error rather than an acknowledgement and the
-    credentials never travel to another address (:need:`REQ_MIRROR_RESUME`).
-    `opener` exists so tests can inject a fake transport, exactly as in
-    `client.Client`.
+    Implements :need:`REQ_INFLUX_WRITE_SCOPE` and
+    :need:`REQ_INFLUX_TOKEN_REDACT`. Redirects are never followed, so a 3xx
+    is an error, not an acknowledgement (:need:`REQ_MIRROR_RESUME`).
+    `opener` lets tests inject a fake transport.
     """
 
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
         self.config = config
         self.opener = opener or _http.no_redirect_opener().open
         self._version = config.version
+        self._secrets = (config.token, config.password)
 
     # -- transport -----------------------------------------------------------
-
-    def _redact(self, text: str) -> str:
-        """Scrub the token, the password and any auth header value."""
-        text = _AUTH_RE.sub(lambda m: f"{m.group(1)} <redacted>", text)
-        for secret in (self.config.token, self.config.password):
-            if secret:
-                text = text.replace(secret, "<redacted>")
-        return text
 
     def _auth_headers(self) -> dict[str, str]:
         """Authorization header for the detected version, if credentials exist."""
@@ -205,10 +191,8 @@ class InfluxWriter:
     ) -> tuple[int, Message, bytes]:
         """Perform one request and return ``(status, headers, body)``.
 
-        A 3xx raises: redirects are not followed (see `_http.no_redirect_opener`), and a
-        redirect must never be mistaken for an answer. Every transport failure
-        — including a timeout or reset while reading the response, which
-        urllib does not wrap in `URLError` — becomes a `TrackiwiError`.
+        A 3xx raises (see `_http.no_redirect_opener`). Every transport failure
+        becomes a `TrackiwiError`.
         """
         url = self.config.url + path
         if query:
@@ -227,10 +211,12 @@ class InfluxWriter:
                 f"cannot reach InfluxDB at {self.config.url}",
             )
         except TrackiwiError as error:
-            raise TrackiwiError(self._redact(str(error))) from error
+            raise TrackiwiError(_http.redact(str(error), *self._secrets)) from error
         status, response_headers, _ = result
         if 300 <= status < 400:
-            location = self._redact(response_headers.get("Location") or "(no Location)")
+            location = _http.redact(
+                response_headers.get("Location") or "(no Location)", *self._secrets
+            )
             raise TrackiwiError(
                 f"InfluxDB at {self.config.url} answered HTTP {status}, a redirect to "
                 f"{location}; redirects are not followed — set url to the final address"
@@ -307,12 +293,10 @@ class InfluxWriter:
         status, _, response = self._request("POST", path, query=query, data=body, headers=headers)
         if 200 <= status < 300:
             return
-        detail = self._redact(response[:200].decode("utf-8", "replace"))
+        detail = _http.redact(response[:200].decode("utf-8", "replace"), *self._secrets)
         if 400 <= status < 500 and _RETENTION_DROP in response:
-            # A partial write: InfluxDB stored every point it could and dropped
-            # the ones older than the bucket's retention, which it will never
-            # accept. Refusing the batch would re-send it forever and stall the
-            # mirror behind it, so it counts as acknowledged (REQ_MIRROR_RESUME).
+            # Partial write: the dropped points will never be accepted, so
+            # count the batch as acknowledged rather than stall the mirror.
             print(
                 f"warning: InfluxDB dropped points outside the retention of "
                 f"{self._target_name()} (HTTP {status}): {detail}",
@@ -345,7 +329,7 @@ class InfluxWriter:
             if status == 403:
                 return True, [*lines, "auth OK, bucket not verifiable (write-only token)"]
             if status != 200:
-                detail = self._redact(body[:200].decode("utf-8", "replace"))
+                detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
                 return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
             found = json.loads(body or b"{}").get("buckets") or []
             if any(b.get("name") == self.config.bucket for b in found):
@@ -357,7 +341,7 @@ class InfluxWriter:
         if status in (401, 403):
             return False, [*lines, f"credentials rejected (HTTP {status})"]
         if status != 200:
-            detail = self._redact(body[:200].decode("utf-8", "replace"))
+            detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
             return False, [*lines, f"database lookup failed (HTTP {status}): {detail}"]
         series = (json.loads(body).get("results") or [{}])[0].get("series") or [{}]
         names = {row[0] for row in series[0].get("values") or []}
@@ -385,19 +369,11 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
     """Send every cached row not yet mirrored to the writer's target.
 
     Implements :need:`REQ_MIRROR_RESUME`: the stored position advances only
-    after a batch is acknowledged, so it never moves past a row InfluxDB has
-    not accepted, and a failure leaves earlier batches recorded. Implements
-    :need:`REQ_MIRROR_IDEMPOTENT`: a row always becomes the same point (same
-    tags, same timestamp), which InfluxDB overwrites rather than duplicates,
-    so re-sending is always safe. That is why the ``tracker_name`` tag is only
-    ever the stored name: a batch holding a row whose tracker has no stored
-    name is not sent at all (the mirror stops before it with a
-    `TrackiwiError`), because a tag made up here would later split that
-    tracker into two series. `ingest` stores a name for every cached tracker
-    (:need:`REQ_MIRROR_FALLBACK_NAME`), so this only happens before the first
-    name refresh that succeeds.
-    Returns the number of points sent; the first failed batch re-raises its
-    `TrackiwiError`.
+    after a batch is acknowledged. Implements :need:`REQ_MIRROR_IDEMPOTENT`:
+    a row always becomes the same point, so re-sending is safe; hence
+    ``tracker_name`` is only the stored name, and a batch with an unnamed
+    tracker raises `TrackiwiError` before sending.
+    Returns the number of points sent; the first failed batch re-raises.
     """
     target = writer.target_key()
     last = store.mirror_position(target)

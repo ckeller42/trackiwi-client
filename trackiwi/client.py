@@ -11,7 +11,6 @@ import json
 import math
 import os
 import platform
-import re
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -31,12 +30,8 @@ _REQUIRED_COLUMNS = ("id", "tracker_id", "fix_at", "latitude", "longitude")
 #: design spec, section 10.5.
 _MILLISECOND_THRESHOLD = 10_000_000_000
 
-#: Plausible range for `fix_at` *after* normalisation, in epoch seconds:
-#: anything from 1970-01-01T00:00:01Z to 9999-12-31T23:59:59Z. The upper bound
-#: is what `datetime.fromtimestamp` can represent, so a value beyond it would
-#: pass parsing and the store and then crash every export (not only of that
-#: row, but of any range containing it). If trackiwi ever emits microseconds,
-#: `normalize_epoch` divides by 1000 only once and the value lands here.
+#: Plausible `fix_at` range after normalisation: 1970-01-01T00:00:01Z up to the
+#: largest value `datetime.fromtimestamp` can render, so no row can crash an export.
 _MIN_FIX_AT = 1
 _MAX_FIX_AT = 253402300799
 
@@ -46,10 +41,7 @@ def normalize_epoch(value: int) -> int:
 
     Implements :need:`REQ_FIX_AT_SECONDS`.
 
-    The sync CSV's form, and only that: `parse_positions` has already called
-    `int()` on the field by the time this runs. See :func:`epoch_from_iso` for
-    the ISO 8601 form that `GET /api/v2/trackers` sends, and for why the two
-    are separate functions.
+    The sync CSV's form only; see :func:`epoch_from_iso` for the ISO form.
 
     >>> normalize_epoch(1700000000)
     1700000000
@@ -64,38 +56,12 @@ def epoch_from_iso(value: str) -> int:
 
     Implements :need:`REQ_FIX_AT_SECONDS`.
 
-    `fix_at` has **two types on two endpoints**: an epoch integer in seconds
-    in the sync CSV, and an ISO 8601 string inside `latest_positionlog` on
-    `GET /api/v2/trackers` (`received_at` likewise). Both were verified live.
-
-    This is a *sibling* of :func:`normalize_epoch`, not an extension of it,
-    because the two forms differ in more than their input type:
-
-    - A single `int | str` function would be ambiguous on its most likely bad
-      input. `"1766663018"` is a string that is also an epoch, so a union-typed
-      normaliser has to guess whether a digit string means "parse as ISO" or
-      "coerce and treat as epoch" — and either guess is wrong somewhere. Two
-      functions make the caller say which endpoint the value came from, which
-      it always knows.
-    - The failure handling is opposite. A bad CSV field must raise `ValueError`
-      so `parse_positions` skips and counts the row (one bad row must not
-      discard a sync page). There is no row to skip when reading a JSON field,
-      so this converts to `TrackiwiError` at the module boundary instead, per
-      the project's boundary-conversion rule.
-    - `normalize_epoch` keeps exactly the contract its existing callers and
-      tests rely on, with no widened signature to re-verify.
-
-    `datetime.fromisoformat` handles the trailing `Z` from Python 3.11, which
-    is this project's floor (checked on 3.11 itself, not inferred from the
-    changelog), so no dependency and no hand-rolled parsing is needed.
-
-    A value with no zone is read as **UTC**. `fromisoformat` returns a naive
-    datetime there and naive `.timestamp()` quietly applies the *machine's*
-    local zone, which would decode the same response to a different instant on
-    a different machine and shift every exported track by the offset.
-
-    The result is range-checked like the CSV path's, so a timestamp the
-    exporters cannot render never reaches them.
+    The ISO form of `GET /api/v2/trackers` (`latest_positionlog.fix_at`,
+    `received_at`). Kept apart from :func:`normalize_epoch` because a digit
+    string would be ambiguous and the error handling differs: a bad CSV field
+    raises `ValueError` (the row is skipped), a bad JSON field has no row to
+    skip and raises `TrackiwiError`. A zone-less value is read as **UTC**, not
+    the machine's zone. The result is range-checked like the CSV path's.
 
     >>> epoch_from_iso("2023-11-14T22:13:20Z")
     1700000000
@@ -131,11 +97,7 @@ def _coerce(column: str, raw: str) -> float | int | None:
         return int(raw)
     value = float(raw)
     if not math.isfinite(value):
-        # `float()` accepts "nan"/"inf"/"-inf", and nothing downstream catches
-        # them: `inf` yields schema-invalid GPX and invalid JSON, `nan` becomes
-        # NULL on insert and raises on the NOT NULL constraint. A non-finite
-        # coordinate is malformed data, so raise and let the caller skip and
-        # count the row like any other malformed field.
+        # `float()` accepts "nan"/"inf"; both would corrupt exports or the NOT NULL column.
         raise ValueError(f"non-finite value for {column}: {raw!r}")
     return value
 
@@ -146,12 +108,10 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int, int | None]:
     Implements :need:`REQ_MALFORMED_SKIP`, :need:`REQ_FIX_AT_SECONDS` and
     :need:`REQ_SYNC_PAST_MALFORMED`.
 
-    Returns `(rows, skipped, last_id)`. Rows are tuples in
-    :data:`trackiwi.COLUMNS` order with `fix_at` normalised to epoch seconds.
-    Malformed rows are skipped and counted rather than aborting the batch,
-    matching the vendor client's behaviour: one bad row must not discard a
-    whole sync page. `last_id` is the highest id on any line whose first field
-    is an integer, skipped lines included, or ``None`` when there is none.
+    Returns `(rows, skipped, last_id)`: tuples in :data:`trackiwi.COLUMNS` order
+    with `fix_at` in epoch seconds. Malformed rows are skipped and counted.
+    `last_id` is the highest integer id on any line, skipped ones included, or
+    ``None``.
 
     >>> body = "1,7,1700000000,1,31.0,-41.0,12,0.0,0,0,-71,9,98,4120\\n"
     >>> rows, skipped, last_id = parse_positions(body)
@@ -171,14 +131,9 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int, int | None]:
         line = line.strip()
         if not line:
             continue
-        # `split(",")` rather than the `csv` module: every one of the 14
-        # columns is numeric, so the sync body can never contain a quoted or
-        # embedded-comma field. Note the asymmetry with `export.to_csv`, which
-        # does use `csv.writer` — an export is written for other tools, not to
-        # be re-read here.
+        # Plain `split`: all 14 columns are numeric, so nothing is ever quoted.
         fields = line.split(",")
-        # Read before the row is judged: `sync` has to move past a malformed
-        # row as well, or it is fetched and skipped again on every page.
+        # Read before the row is judged so `sync` can move past a malformed row.
         with contextlib.suppress(ValueError):
             ids.append(int(fields[0]))
         if len(fields) != len(COLUMNS):
@@ -192,10 +147,7 @@ def parse_positions(text: str) -> tuple[list[tuple[Any, ...]], int, int | None]:
         if any(values[c] is None for c in _REQUIRED_COLUMNS):
             skipped += 1
             continue
-        # `fix_at` is in `_REQUIRED_COLUMNS`, so the check just above guarantees
-        # it is not None here; `_coerce` returns an `int` for it (not in
-        # `_FLOAT_COLUMNS`). mypy cannot see through the `any(...)` generator, so
-        # this narrows the value it already knows is present.
+        # Narrowing for mypy: `fix_at` is required, so it is not None here.
         fix_at_raw = values["fix_at"]
         assert fix_at_raw is not None
         fix_at = normalize_epoch(int(fix_at_raw))
@@ -221,37 +173,13 @@ def default_config_path() -> Path:
     return root / "trackiwi" / "config.json"
 
 
-#: Anything that looks like a bearer credential in server-controlled text.
-_BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
-
-
-def _redact(text: str, token: str | None = None) -> str:
-    """Strip bearer credentials from text that is about to be shown.
-
-    Implements :need:`REQ_TOKEN_NEVER_LOGGED`.
-
-    Spec section 7.3 requires the token to be redacted in any output. The one
-    place a token can plausibly re-enter output is an error body: proxies and
-    API gateways echo request details, including request headers, into 4xx/5xx
-    responses, and `_check` interpolates the first 200 bytes of the body into a
-    message the CLI prints to stderr — from where it reaches scrollback,
-    `script` captures, CI logs and bug reports.
-    """
-    text = _BEARER_RE.sub("Bearer <redacted>", text)
-    if token:
-        text = text.replace(token, "<redacted>")
-    return text
-
-
 def _check(status: int, body: bytes, token: str | None = None) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling.
 
     Implements :need:`REQ_TOKEN_NEVER_LOGGED`: the interpolated body is redacted.
     Implements :need:`REQ_NO_REDIRECTS`: a 3xx raises.
 
-    `token`, when given, is this session's own token, scrubbed from the body
-    in addition to the generic `Bearer ...` pattern. `_check` is module-level
-    and so has no `self` to read it from.
+    `token`, when given, is this session's own token, scrubbed from the body.
     """
     if 300 <= status < 400:
         # Never success and never "no more data": see `_http.no_redirect_opener`.
@@ -271,7 +199,7 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
         raise TrackiwiError("rate limited by trackiwi — wait, then re-run", status=status)
     if status == 503:
         raise TrackiwiError("trackiwi is in maintenance — try again later", status=status)
-    detail = _redact(body[:200].decode("utf-8", "replace"), token)
+    detail = _http.redact(body[:200].decode("utf-8", "replace"), token)
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
@@ -280,15 +208,10 @@ def _require_https(api_base: str) -> str:
 
     Implements :need:`REQ_API_BASE_HTTPS`.
 
-    Nothing validated the scheme before, and the value arrives from two
-    untrusted-ish places: the login response's `server` field and whatever
-    `--api-base` (or a config file) says. An `http://` value would send
-    `Authorization: Bearer <token>` in cleartext on every request; this also
-    catches a typo'd `--api-base`.
-
-    The message names the way out, because a config file holding such a value
-    fails *every* authenticated command and the user needs to know what to do
-    about it — see `Client.load` and `cmd_logout`.
+    The value comes from the login response, `--api-base` or the config file;
+    `http://` would send the bearer token in cleartext. The message names the
+    way out because a bad stored value fails every authenticated command (see
+    `Client.load`, `cmd_logout`).
     """
     if not api_base.lower().startswith("https://"):
         raise TrackiwiError(
@@ -300,11 +223,8 @@ def _require_https(api_base: str) -> str:
 def _decode_json(body: bytes) -> object:
     """Parse a response body, converting a non-JSON body at the boundary.
 
-    A WAF, captive portal or API gateway can answer 200 with an HTML page;
-    `json.loads` then raises `json.JSONDecodeError`, which is not a
-    `TrackiwiError` and used to escape `main()` as a traceback. The message
-    never includes the body, because such a page can echo the request's own
-    `Authorization` header back at us.
+    A WAF or captive portal can answer 200 with HTML. The message never
+    includes the body: it can echo the request's `Authorization` header.
     """
     try:
         return json.loads(body)
@@ -347,21 +267,13 @@ class Client:
         path = default_config_path()
         if not path.exists():
             return cls(opener=opener)
-        # Steady-state self-heal, mirroring Store.__enter__: a config file
-        # widened after login (restored from a backup, copied with `cp`, synced
-        # by a dotfile manager) is narrowed back here, since `save()` normally
-        # runs only once. A chmod we are not allowed to perform must not stop
-        # the session from loading.
+        # Narrow a widened config file (restored backup, `cp`); never block loading.
         with contextlib.suppress(OSError):
             os.chmod(path, 0o600)
         try:
             raw = path.read_text(encoding="utf-8")
         except OSError as error:
-            # Not corruption: a permission-denied read, a directory in the way
-            # or an I/O error says something different about what is wrong, and
-            # collapsing it into the corrupt-config message dropped the errno
-            # that identifies it. The recovery is the same, because `save()`
-            # chmods the parent directory back to 0700 first.
+            # Not corruption: keep the errno, which identifies what is wrong.
             raise TrackiwiError(
                 f"cannot read the config file ({path}): {error} — run 'trackiwi login' again"
             ) from error
@@ -375,11 +287,8 @@ class Client:
         if not isinstance(data, dict):
             raise corrupt
         api_base = data.get("api_base")
-        # The values are validated, not only the top-level document: a
-        # non-string `api_base` reached `_require_https`, whose `.lower()`
-        # raised an uncaught `AttributeError` — a raw traceback one line past
-        # the check added to prevent exactly that. `None` is legitimate and
-        # means "not logged in".
+        # Validate values too: a non-string reaches `_require_https` as an
+        # `AttributeError`. `None` means "not logged in".
         if not isinstance(api_base, (str, type(None))):
             raise corrupt
         return cls(
@@ -413,11 +322,8 @@ class Client:
 
         Implements :need:`REQ_CONFIG_MODE_0600`.
 
-        The directory and the file are created *at* their final mode, not
-        widened-then-narrowed: `write_text` plus a follow-up `chmod` left a
-        window (0644 under the usual umask, 0666 under a permissive one) in
-        which another local process could open the token file and keep the
-        descriptor — a later chmod does not revoke an open fd.
+        Directory and file are created *at* their final mode, never widened and
+        then narrowed, so no other process can hold an open fd on a wider file.
         """
         self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.config_path.parent, 0o700)
@@ -480,10 +386,8 @@ class Client:
                 method, f"{self.api_base}{path}", body=body, timeout=timeout, authed=True
             )
         except TrackiwiError as error:
-            # Belt and braces: every authenticated failure that surfaces from
-            # below is scrubbed of this session's token before it travels any
-            # further, whatever produced the message.
-            message = _redact(str(error), self.token)
+            # Belt and braces: scrub the token from whatever message surfaced.
+            message = _http.redact(str(error), self.token)
             if message == str(error):
                 raise
             raise type(error)(message, status=error.status) from None
@@ -500,10 +404,7 @@ class Client:
         )
         _check(status, body, self.token)
         data = _decode_json(body)
-        # `_decode_json` returns `object` (a JSON value can be any shape); a
-        # non-object body would previously fall into the `except TypeError`
-        # below via the failed subscription. Narrowing here keeps that same
-        # outcome while letting the field reads type-check.
+        # `_decode_json` returns `object`; narrow it for the field reads.
         if not isinstance(data, dict):
             raise TrackiwiError("unexpected login response from trackiwi")
         try:
@@ -525,14 +426,6 @@ class Client:
         self.user_id = user_id
         self.save()
         return user
-
-    def session_ok(self) -> bool:
-        """Return whether the stored session is still accepted by the server."""
-        try:
-            status, _, _ = self._api("GET", "/api/v2/session")
-        except AuthError:
-            return False
-        return status < 300
 
     def logout(self) -> bool:
         """Revoke server-side first; a local delete alone leaves a live token.
@@ -642,10 +535,8 @@ class Client:
         Verified live: a bare JSON list whose records carry `acknowledged`,
         `alarm_type`, `event`, `id`, `inserted_at` and `tracker_id`.
 
-        **This output is a location history.** Each record's `event` object
-        embeds `latitude`/`longitude`, so an alarm list says where the vehicle
-        was every time an alarm fired — which for a theft or geofence alarm is
-        precisely the interesting places. It is not "just" a list of alerts.
+        **This output is a location history**: each record's `event` embeds
+        `latitude`/`longitude`.
 
         Nothing here acknowledges, clears or tests an alarm: this client is
         read-only by construction (design spec, section 7.5).
@@ -665,15 +556,8 @@ class Client:
         """
         return self._get_list("/api/v2/shares", "shares")
 
-    # `POST /api/v2/session/test_alarm` exists in trackiwi's API and is
-    # deliberately NOT implemented, here or anywhere else. It fires a real
-    # alarm on a real vehicle, which is both a state change (forbidden by the
-    # read-only rule that allows only `DELETE /api/v2/session`) and a physical
-    # event in the owner's life. There is no safe way to exercise it and no
-    # read-only use for it. The same goes for the item/mutation routes the app
-    # uses to create, update and delete tours, markers, marker categories,
-    # shares and trackers (the trailing-slash variants of the paths above), and
-    # for `PUT /api/v2/session/push_token`.
+    # `POST /api/v2/session/test_alarm` (fires a real alarm), the item/mutation
+    # routes and `PUT /api/v2/session/push_token` are deliberately NOT implemented.
 
     def sync(
         self, offset: int | None = None
@@ -683,26 +567,11 @@ class Client:
         Implements :need:`REQ_SYNC_RESUME`, :need:`REQ_SYNC_OFFSET_EXCLUSIVE`,
         :need:`REQ_SYNC_FAIL_LOUD` and :need:`REQ_SYNC_PAST_MALFORMED`.
 
-        Offset-based and therefore resumable: if this fails part-way, simply
-        running it again continues from the highest id already stored. That is
-        why there is no retry logic anywhere in this client.
-
-        The offset advances to the highest id on the page, malformed rows
-        included, so `rows` can be empty in a batch that only skipped: a
-        malformed row at the newest end of the data is passed, not re-fetched
-        until a newer good row happens to follow it.
-
-        Two failure shapes are distinguished from ordinary end-of-data:
-
-        - A page on which no line has a readable id but one or more were
-          skipped is not "no more data" — it is a parse failure with no next
-          offset to go to. Continuing would silently re-fetch and re-fail on
-          the same page, so this raises instead. Only a page with nothing to
-          skip either (a genuinely empty response) ends the loop normally.
-        - If the server ever returns a page whose highest id does not exceed
-          the offset just requested (a duplicate, a stale cache, an
-          off-by-one on their side), advancing by that id would spin
-          forever re-requesting the same data. This raises rather than loop.
+        Offset-based, hence resumable: re-running continues from the highest
+        stored id (there is no retry logic). The offset advances to the highest
+        id on the page, malformed rows included, so a batch's `rows` can be
+        empty. Raises when a page has skipped rows but no readable id, or when
+        the highest id does not pass the requested offset (it would loop).
         """
         total: int | None = None
         while True:

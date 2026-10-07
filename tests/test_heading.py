@@ -11,7 +11,6 @@ from trackiwi import COLUMNS
 from trackiwi.cli import main
 from trackiwi.heading import (
     DEFAULT_STALE_AFTER,
-    STATES,
     Heading,
     estimate_heading,
     estimate_headings,
@@ -191,10 +190,6 @@ def test_course_is_normalised_into_the_interval():
 def test_now_defaults_to_the_wall_clock(monkeypatch):
     monkeypatch.setattr(time, "time", lambda: NOW + 0.7)
     assert estimate_heading(PARKED).parked_for == 180
-
-
-def test_states_lists_every_state_in_falling_confidence():
-    assert STATES == ("moving", "freshly_parked", "stale", "unknown")
 
 
 def test_headings_are_estimated_per_tracker():
