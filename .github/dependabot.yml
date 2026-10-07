@@ -7,3 +7,8 @@ updates:
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
+  # Hook revs in .pre-commit-config.yaml. ruff's `ruff==` pin in [dev] is the
+  # pip ecosystem's job and must be kept in step by hand (see AGENTS.md).
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule: { interval: weekly }
