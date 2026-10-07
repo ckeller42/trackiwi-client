@@ -95,12 +95,10 @@ flowchart TB
     timer -->|trackiwi ingest| cli
     cli --> client
     cli --> store
-    cli --> export
-    cli --> heading
+    cli -->|passes rows| export
+    cli -->|passes rows| heading
     cli --> mirror
     client -->|HTTPS| cloud
-    export -->|reads rows| store
-    heading -->|reads rows| store
     mirror -->|reads rows, mirror state| store
     mirror -->|HTTP write| influxdb
 
@@ -219,7 +217,8 @@ and the first trackiwi-side error decides the exit code. The mirror position is 
 InfluxDB acknowledges a batch (a 2xx, or a 4xx partial write for points beyond the bucket's
 retention), so a failure leaves the failed batch and everything after it for the next run. A point
 is a pure function of its row, so sending twice overwrites rather than duplicates. A tracker with
-no stored name stops the mirror before it sends anything. {need}`REQ_MIRROR_RESUME`,
+no stored name stops the mirror before the batch containing it is sent. Earlier batches stay sent
+and their position is kept. {need}`REQ_MIRROR_RESUME`,
 {need}`REQ_MIRROR_IDEMPOTENT`, {need}`REQ_MIRROR_FALLBACK_NAME`, {need}`REQ_INFLUX_WRITE_SCOPE`
 
 ## 7. Deployment
