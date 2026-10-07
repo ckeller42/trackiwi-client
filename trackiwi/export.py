@@ -13,30 +13,18 @@ import math
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
-from . import COLUMNS, __version__
+from . import COLUMNS, Row, __version__
 
 GPX_NS = "http://www.topografix.com/GPX/1/1"
-
-
-class Row(Protocol):
-    """A position row addressed by column name.
-
-    The exporters accept both a `sqlite3.Row` (what `store.query` returns) and a
-    plain `dict` (what the doctests and callers build); both answer `row["name"]`
-    for a column, so that is all this contract promises. Values are `Any` because
-    the cache stores heterogeneous columns (ints, floats, `None`).
-    """
-
-    def __getitem__(self, key: str) -> Any: ...
 
 
 def _iso(fix_at: int) -> str:
     return datetime.fromtimestamp(fix_at, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
+def by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
     """Group rows by `tracker_id`, keeping each tracker's rows in input order.
 
     An export without `--tracker` covers every tracker (design spec, section 6)
@@ -91,7 +79,7 @@ def to_gpx(rows: Sequence[Row]) -> str:
         "gpx",
         {"version": "1.1", "creator": f"trackiwi-client/{__version__}", "xmlns": GPX_NS},
     )
-    for tracker_id, tracker_rows in _by_tracker(rows).items():
+    for tracker_id, tracker_rows in by_tracker(rows).items():
         trk = ET.SubElement(gpx, "trk")
         ET.SubElement(trk, "name").text = f"tracker {tracker_id}"
         seg = ET.SubElement(trk, "trkseg")
@@ -133,7 +121,7 @@ def to_geojson(rows: Sequence[Row]) -> str:
     7
     """
     features: list[dict[str, Any]] = []
-    for tracker_id, tracker_rows in _by_tracker(rows).items():
+    for tracker_id, tracker_rows in by_tracker(rows).items():
         coordinates = [[row["longitude"], row["latitude"]] for row in tracker_rows]
         geometry: dict[str, Any]
         if len(coordinates) == 1:

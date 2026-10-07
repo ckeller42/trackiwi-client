@@ -26,7 +26,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .export import Row, _by_tracker
+from . import Row
+from .export import by_tracker
 
 #: Seconds after the last moving fix at which a parked estimate becomes
 #: ``stale``. One hour: on a device that reports while parked the raw
@@ -39,9 +40,6 @@ DEFAULT_STALE_AFTER = 3600
 
 State = Literal["moving", "freshly_parked", "stale", "unknown"]
 Source = Literal["course", "bearing", "none"]
-
-#: Every value `Heading.state` can take, in the order confidence falls.
-STATES: tuple[State, ...] = ("moving", "freshly_parked", "stale", "unknown")
 
 
 @dataclass(frozen=True)
@@ -234,5 +232,5 @@ def estimate_headings(
     """
     return {
         tracker_id: estimate_heading(tracker_rows, now=now, stale_after=stale_after)
-        for tracker_id, tracker_rows in _by_tracker(rows).items()
+        for tracker_id, tracker_rows in by_tracker(rows).items()
     }

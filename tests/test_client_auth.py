@@ -114,19 +114,6 @@ def test_logout_clears_local_state_even_if_revoke_fails():
     assert not default_config_path().exists()
 
 
-def test_authenticated_requests_send_bearer_token():
-    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
-    opener = FakeOpener(FakeResponse(b'{"token":"tok","user":{"id":42}}'))
-    assert Client.load(opener=opener).session_ok() is True
-    assert opener.calls[0].get_header("Authorization") == "Bearer tok"
-
-
-def test_session_ok_is_false_when_rejected():
-    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
-    opener = FakeOpener(FakeResponse(b"", status=401))
-    assert Client.load(opener=opener).session_ok() is False
-
-
 # --- Real urllib exceptions, not fake in-band statuses ------------------
 #
 # Real `urllib.request.urlopen` never *returns* a response for a non-2xx
@@ -169,13 +156,6 @@ def test_login_with_malformed_success_body_raises_trackiwierror():
     opener = FakeOpener(FakeResponse(body))
     with pytest.raises(TrackiwiError, match="unexpected login response"):
         Client(opener=opener).login("a@example.invalid", "pw")
-
-
-def test_session_ok_propagates_non_auth_errors():
-    Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
-    opener = FakeOpener(urllib.error.URLError("boom"))
-    with pytest.raises(TrackiwiError, match="network error"):
-        Client.load(opener=opener).session_ok()
 
 
 # --- The API base must be https, wherever it came from ---

@@ -374,17 +374,16 @@ def cmd_influx_check(_: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _push() -> int:
-    """Mirror new cached rows to InfluxDB and return how many were sent."""
+def _push() -> None:
+    """Mirror new cached rows to InfluxDB."""
     writer = InfluxWriter(load_config())
     if not default_db_path().exists():
         # Never create the cache as a side effect: it is a movement history.
         print("nothing cached yet — run 'trackiwi sync' first")
-        return 0
+        return
     with Store() as store:
         sent = mirror(store, writer)
     print(f"pushed {sent} positions to InfluxDB")
-    return sent
 
 
 def cmd_influx_push(_: argparse.Namespace) -> int:

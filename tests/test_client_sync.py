@@ -162,6 +162,14 @@ def test_bearer_header_echoed_in_an_error_body_is_redacted():
     assert "<redacted>" in message
 
 
+def test_token_and_basic_headers_echoed_in_an_error_body_are_redacted():
+    c = client(FakeResponse(b"echo: Token tok-abc and Basic dTpw", status=502))
+    with pytest.raises(TrackiwiError) as excinfo:
+        c.trackers()
+    assert "tok-abc" not in str(excinfo.value)
+    assert "dTpw" not in str(excinfo.value)
+
+
 def test_the_sessions_own_token_echoed_in_an_error_body_is_redacted():
     """The `Bearer` pattern does not catch a token echoed on its own, so the
     concrete `self.token` value is scrubbed as well."""
@@ -220,7 +228,3 @@ def test_a_redirect_is_not_read_as_no_more_data():
     c = client(FakeResponse(b"", status=302, headers={"Location": "http://other.example.invalid"}))
     with pytest.raises(TrackiwiError, match="redirect"):
         list(c.sync())
-
-
-def test_a_redirect_is_not_a_valid_session():
-    assert client(FakeResponse(b"", status=302)).session_ok() is False

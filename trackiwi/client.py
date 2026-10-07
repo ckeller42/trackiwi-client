@@ -11,7 +11,6 @@ import json
 import math
 import os
 import platform
-import re
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -221,28 +220,6 @@ def default_config_path() -> Path:
     return root / "trackiwi" / "config.json"
 
 
-#: Anything that looks like a bearer credential in server-controlled text.
-_BEARER_RE = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
-
-
-def _redact(text: str, token: str | None = None) -> str:
-    """Strip bearer credentials from text that is about to be shown.
-
-    Implements :need:`REQ_TOKEN_NEVER_LOGGED`.
-
-    Spec section 7.3 requires the token to be redacted in any output. The one
-    place a token can plausibly re-enter output is an error body: proxies and
-    API gateways echo request details, including request headers, into 4xx/5xx
-    responses, and `_check` interpolates the first 200 bytes of the body into a
-    message the CLI prints to stderr — from where it reaches scrollback,
-    `script` captures, CI logs and bug reports.
-    """
-    text = _BEARER_RE.sub("Bearer <redacted>", text)
-    if token:
-        text = text.replace(token, "<redacted>")
-    return text
-
-
 def _check(status: int, body: bytes, token: str | None = None) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling.
 
@@ -271,7 +248,7 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
         raise TrackiwiError("rate limited by trackiwi — wait, then re-run", status=status)
     if status == 503:
         raise TrackiwiError("trackiwi is in maintenance — try again later", status=status)
-    detail = _redact(body[:200].decode("utf-8", "replace"), token)
+    detail = _http.redact(body[:200].decode("utf-8", "replace"), token)
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
@@ -483,7 +460,7 @@ class Client:
             # Belt and braces: every authenticated failure that surfaces from
             # below is scrubbed of this session's token before it travels any
             # further, whatever produced the message.
-            message = _redact(str(error), self.token)
+            message = _http.redact(str(error), self.token)
             if message == str(error):
                 raise
             raise type(error)(message, status=error.status) from None
@@ -525,14 +502,6 @@ class Client:
         self.user_id = user_id
         self.save()
         return user
-
-    def session_ok(self) -> bool:
-        """Return whether the stored session is still accepted by the server."""
-        try:
-            status, _, _ = self._api("GET", "/api/v2/session")
-        except AuthError:
-            return False
-        return status < 300
 
     def logout(self) -> bool:
         """Revoke server-side first; a local delete alone leaves a live token.
