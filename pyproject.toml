@@ -33,7 +33,7 @@ dev = [
     # land in minor releases), so a pin keeps the type gate reproducible — same
     # reasoning as the sphinx-needs pin above. No third-party stubs are needed
     # because the package imports only the standard library.
-    "mypy==2.3.1",
+    "mypy==2.4.0",
 ]
 
 [project.scripts]
