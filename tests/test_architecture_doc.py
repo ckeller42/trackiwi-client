@@ -1,4 +1,4 @@
-"""The Component diagram in docs/architecture.rst must match the real imports.
+"""The component view in docs/model/architecture.c4 must match the real imports.
 
 A diagram that no longer matches the code is worse than none. The arrows are the
 package's intra-package imports, the `python -m trackiwi` entry point included; the
@@ -13,10 +13,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _diagram():
-    text = (ROOT / "docs" / "architecture.rst").read_text(encoding="utf-8")
-    block = text.split("C4Component", 1)[1].split(".. mermaid::", 1)[0]
-    labels = dict(re.findall(r'Component\((\w+), "([^"]+)"', block))
-    edges = {(labels[a], labels[b]) for a, b in re.findall(r"Rel\((\w+), (\w+),", block)}
+    text = (ROOT / "docs" / "model" / "architecture.c4").read_text(encoding="utf-8")
+    labels = dict(re.findall(r"(\w+) = component '([^']+)'", text))
+    pairs = re.findall(r"^\s+(\w+) -> (\w+) '", text, re.M)
+    edges = {(labels[a], labels[b]) for a, b in pairs if a in labels and b in labels}
     return set(labels.values()), edges
 
 
@@ -32,13 +32,13 @@ def _package():
     return modules, edges
 
 
-def test_the_component_diagram_shows_every_module():
+def test_the_component_view_shows_every_module():
     drawn, _ = _diagram()
     modules, _ = _package()
     assert drawn == modules
 
 
-def test_the_component_diagram_arrows_are_the_real_imports():
+def test_the_component_view_arrows_are_the_real_imports():
     _, drawn = _diagram()
     _, real = _package()
     assert drawn == real, f"only in the diagram: {drawn - real}; only in the code: {real - drawn}"

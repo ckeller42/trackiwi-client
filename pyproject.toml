@@ -29,6 +29,7 @@ dev = [
     "sphinx>=8,<10",
     "sphinx-needs==8.5.0",
     "sphinxcontrib-mermaid==2.1.1",
+    "sphinx-likec4==0.2.1",
     "furo==2025.12.19",
     "interrogate>=1.7",
     # Pinned exactly: strict mode's finding set is version-sensitive (new checks

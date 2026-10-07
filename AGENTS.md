@@ -105,9 +105,9 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   `detect-secrets` (`.secrets.baseline`, regenerate and audit before committing)
   and `SECRET_RE` in `tools/check_no_private_data.py`. Keep all three.
 - `python -m trackiwi …` runs straight from a clone.
-- **Architecture diagrams** (C4 + Mermaid) are `docs/architecture.rst`. When a module boundary
-  changes, update the Component diagram: `tests/test_architecture_doc.py` fails if its arrows
-  stop matching the real imports.
+- **Architecture diagrams** (LikeC4 model `docs/model/architecture.c4`, shown by `docs/architecture.rst`; the doc build needs
+  node 20+). When a module boundary changes, update the model: `tests/test_architecture_doc.py`
+  fails if the component relations stop matching the real imports.
 - **Releasing:** the version has one source, `trackiwi/__init__.py`
   (`pyproject.toml` reads it). Bump it in a PR; after merge tag the merge
   commit `vX.Y.Z` and create a GitHub release. Deployment steps for a specific
