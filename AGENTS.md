@@ -80,6 +80,21 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   `deploy/example.env` because the guard rejects `.env.*` names.
 - **No retry logic:** `sync` is offset-based and resumable; re-running is the retry.
 
+## Docs contract
+
+- The site under `docs/` has four groups, in this order: Getting started, How-to guides, Reference,
+  Explanation (plus Contributing). A page belongs to exactly one; `docs/index.rst` holds the toctrees.
+- One architecture page, `docs/architecture.md`: arc42 sections 1 to 12, drawn with C4-styled
+  Mermaid flowcharts and sequence diagrams (person `#08427b`, system `#1168bd`, container
+  `#438dd5`, external `#999`). No `;`, bare `&`, bare `<`/`>`, `<-->` or `:` in a loop/opt label.
+  Diagram text must match the code. Behaviour claims link to a `REQ_*` (`{need}`) or a module.
+- One source per fact: a how-to or reference page links to the README or requirements, it does
+  not copy them. A new requirement-like statement stays prose unless code implements it and a
+  test verifies it (then it gets a `REQ_*`, see Rules above).
+- `sphinx-build -b html -W docs docs/_build/html` must pass (the `docs` job); `myst-parser` and
+  `sphinxcontrib-mermaid` are pinned in the `dev` extra and are docs tooling, never runtime deps.
+- The concept (shared by all ckeller42 repos) is `DOCUMENTATION.md` in `ckeller42/buspi-config`.
+
 ## Workflow
 
 - Branch, then PR into `main`. A repo ruleset enforces it: PR required,

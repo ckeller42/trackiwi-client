@@ -1,6 +1,10 @@
-"""Sphinx configuration for the trackiwi-client requirements-traceability build.
+"""Sphinx configuration for the trackiwi-client documentation site.
 
-This build has one job the README cannot do: prove that every project
+The site has four groups (getting started, how-to guides, reference,
+explanation), plus a contributing group. Its architecture page draws Mermaid
+diagrams (client-side mermaid.js, no server) from Markdown via myst-parser.
+
+The build also has one job the README cannot do: prove that every project
 requirement is verified by a test. Requirements live as ``sphinx-needs`` ``req``
 objects (``requirements.rst``); each implementing function's docstring references
 the requirement it satisfies with the ``:need:`` role; and each requirement is
@@ -9,8 +13,9 @@ traced to its verifying test via a ``test`` need that ``:verifies:`` it
 requirement with no verifying test" into a build warning, and ``sphinx-build -W``
 turns that warning into a non-zero exit — so CI fails on an untraced requirement.
 
-Zero runtime dependencies still holds: sphinx, sphinx-needs and interrogate are
-dev-only tooling and the package itself imports stdlib only.
+Zero runtime dependencies still holds: sphinx, sphinx-needs, myst-parser,
+sphinxcontrib-mermaid and interrogate are dev-only tooling and the package
+itself imports stdlib only.
 """
 
 from __future__ import annotations
@@ -26,11 +31,21 @@ author = "Christoph Keller"
 project_copyright = "2026, Christoph Keller"
 
 extensions = [
+    "myst_parser",  # the Markdown pages (architecture, how-tos, reference)
+    "sphinxcontrib.mermaid",  # C4-styled diagrams; rendered in the browser
     "sphinx_needs",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.doctest",
 ]
+
+# Markdown: ```mermaid fences become the mermaid directive; headings get anchors
+# down to ### so pages can link to a section.
+myst_fence_as_directive = ["mermaid"]
+myst_heading_anchors = 3
+
+# Local-only design records (gitignored) and build output are not site pages.
+exclude_patterns = ["_build", "superpowers/**"]
 
 # Furo (dev-only docs dependency, pinned in the dev extra) — same theme as open-california.
 html_theme = "furo"

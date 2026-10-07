@@ -1,21 +1,48 @@
-trackiwi-client requirements & traceability
-============================================
+trackiwi-client
+===============
 
-This is not end-user documentation — the README is. This build exists to hold
-the project's requirements as first-class, linkable objects and to **fail** if
-any requirement is not verified by a test.
+A read-only, standard-library-only Python client for a personal trackiwi GPS
+account: it syncs positions into a local SQLite cache, exports them as GPX,
+GeoJSON or CSV, estimates which way a parked vehicle points, and can mirror
+the cache into InfluxDB for Grafana. It is unofficial and unaffiliated: trackiwi
+publishes no API, so this talks to the private one its own app uses.
 
-* :doc:`requirements` — every requirement as a ``sphinx-needs`` ``req`` object.
-* :doc:`traceability` — each requirement traced to the test(s) that verify it,
-  plus the requirement → test table. The build fails (under ``-W``) if any
-  ``req`` has no incoming ``verifies`` link.
-* :doc:`api` — the API, rendered from docstrings, so each function's
-  ``Implements :need:`REQ_…``` reference resolves against the requirements.
+The pages are grouped by what the reader needs. The `README
+<https://github.com/ckeller42/trackiwi-client#readme>`_ on GitHub stays the
+short front door.
 
 .. toctree::
-   :maxdepth: 2
-   :caption: Contents
+   :maxdepth: 1
+   :caption: Getting started
 
+   getting-started
+
+.. toctree::
+   :maxdepth: 1
+   :caption: How-to guides
+
+   howto-sync-and-export
+   howto-ingest
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Reference
+
+   reference/cli
+   reference/units
+   reference/exports
    requirements
    traceability
    api
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Explanation
+
+   architecture
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Contributing
+
+   ops

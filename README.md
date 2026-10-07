@@ -13,7 +13,7 @@ Read-only Python client for pulling positions out of a personal
 [trackiwi](https://www.trackiwi.com) account: sync them into a local SQLite
 cache, export them as GPX, GeoJSON or CSV.
 
-📖 **Documentation:** [requirements, traceability and API reference](https://ckeller42.github.io/trackiwi-client/) (GitHub Pages).
+📖 **Documentation:** <https://ckeller42.github.io/trackiwi-client/> — getting started, how-to guides, CLI and unit reference, the architecture, and the requirements traced to their tests.
 
 Unofficial and unaffiliated. trackiwi publishes no API; this talks to the
 private API its own app uses, which can change without notice.
@@ -495,8 +495,9 @@ Test fixtures are synthetic: invented coordinates, invented IDs.
 Every project requirement is a first-class `sphinx-needs` object under `docs/`
 (`docs/requirements.rst`), each traced to the test(s) that verify it
 (`docs/traceability.rst`). The docs build **fails** if any requirement has no
-verifying test, so it runs as a CI gate — only its GitHub Pages hosting is
-deferred until the repo is public. Build it locally with:
+verifying test, so it runs as a CI gate, and the same build is the
+[documentation site](https://ckeller42.github.io/trackiwi-client/) on GitHub Pages.
+Build it locally with:
 
 ```bash
 .venv/bin/sphinx-build -b html -W docs docs/_build/html
