@@ -61,9 +61,7 @@
 
 - `POST /api/login`, `GET`/`DELETE /api/v2/session` (auth and revocation).
 - `POST /api/v2/trackers/sync` (the CSV position feed, cached).
-- `GET /api/v2/trackers` and the read-only lists `GET /api/v2/tours`,
-  `/api/v2/markers`, `/api/v2/marker_categories`, `/api/v2/alarms`,
-  `/api/v2/shares` (live reads, not cached).
+- `GET /api/v2/trackers` (live read, not cached).
 - InfluxDB (not trackiwi): `trackiwi_position` line-protocol writes to the one
   configured target, plus the read-only probes `influx check` uses.
 

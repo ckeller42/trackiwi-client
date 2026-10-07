@@ -16,19 +16,12 @@ import statistics
 import pytest
 
 from trackiwi import COLUMNS
-from trackiwi.cli import READ_COMMANDS
 from trackiwi.client import SYNC_TIMEOUT, Client, _check, epoch_from_iso, parse_positions
 
 pytestmark = [
     pytest.mark.live,
     pytest.mark.skipif(os.environ.get("TRACKIWI_LIVE") != "1", reason="set TRACKIWI_LIVE=1 to run"),
 ]
-
-#: Client method -> keys the CLI prints for it. `trackers` is the one list
-#: command outside `READ_COMMANDS`.
-PRINTED_KEYS = {"trackers": ("id", "name")} | {
-    method: fields for _, method, fields, _ in READ_COMMANDS
-}
 
 
 def _client():
@@ -51,31 +44,19 @@ def test_live_session():
     assert client.session_ok()
 
 
-@pytest.mark.parametrize("method", sorted(PRINTED_KEYS))
-def test_live_list_endpoint(method):
+def test_live_trackers_endpoint():
     client = _client()
     # The client method unwraps the envelope, so only the raw body can say
     # what the wire shape is.
-    _, body = _raw(client, "GET", f"/api/v2/{method}")
+    _, body = _raw(client, "GET", "/api/v2/trackers")
     raw = json.loads(body)
-    if isinstance(raw, dict):
-        print(f"\n{method} envelope: object with keys {sorted(raw)}")
-    else:
-        print(f"\n{method} envelope: bare {type(raw).__name__}")
-
-    records = getattr(client, method)()
-    assert isinstance(records, list)
-    print(f"{method}: {len(records)} record(s)")
-    if not records:
-        print(f"{method}: empty, element shape unverified")
-        return
+    print(f"\ntrackers envelope: {type(raw).__name__}")
+    records = client.trackers()
+    print(f"trackers: {len(records)} record(s)")
     assert all(isinstance(r, dict) for r in records)
-    in_all = set.intersection(*(set(r) for r in records))
-    in_any = set.union(*(set(r) for r in records))
-    expected = set(PRINTED_KEYS[method])
-    print(f"{method} keys: {sorted(in_any)}")
-    print(f"{method} keys the CLI does not print: {sorted(in_any - expected)}")
-    assert not expected - in_all, f"{method}: missing keys {sorted(expected - in_all)}"
+    if records:
+        print(f"trackers keys: {sorted(set.union(*(set(r) for r in records)))}")
+        assert all({"id", "name"} <= set(r) for r in records)
 
 
 def test_live_tracker_timestamps():

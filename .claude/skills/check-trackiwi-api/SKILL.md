@@ -22,7 +22,7 @@ Needs the existing session in `~/.config/trackiwi/config.json`. No `.venv`:
 - **No real data anywhere** — code, tests, commits, issues, PRs, reports.
   Print and report only types, key names, counts, units and plausibility
   verdicts. Never coordinates, tracker names, alarm events, geofence values,
-  email or the token. `trackers` and `alarms` responses *are* location data.
+  email or the token. The `trackers` response *is* location data.
 - **Session invalid (`AuthError` / 401)? Stop and report.** Never ask for,
   type or handle the password.
 
@@ -31,7 +31,7 @@ Needs the existing session in `~/.config/trackiwi/config.json`. No `.venv`:
 | Test | Proves | A failure means |
 | --- | --- | --- |
 | `test_live_session` | `GET /api/v2/session` is 2xx | session expired (stop), or the route moved |
-| `test_live_list_endpoint[x]` | envelope type; the client returns a list; every key the CLI prints exists | "missing keys": a field was renamed or dropped, the `x` command prints `-` |
+| `test_live_trackers_endpoint` | envelope type; the client returns a list; `id` and `name` exist | "assert" on keys: a field was renamed or dropped, `trackers` prints `-` |
 | `test_live_tracker_timestamps` | `latest_positionlog.fix_at`/`received_at` are ISO 8601 strings | the type changed; `epoch_from_iso` callers break |
 | `test_live_sync` | 14 CSV columns, `fix_at` in epoch seconds, count header is an int, offset is exclusive | sync/ingest/export are affected: P1 |
 

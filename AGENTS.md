@@ -404,14 +404,11 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   `TrackiwiError` at the boundary. `epoch_from_iso` reads a zone-less value as
   **UTC** on purpose — naive `.timestamp()` applies the *machine's* zone, which
   would shift every exported track by the local offset.
-- **`GET /api/v2/trackers` and `GET /api/v2/alarms` both return location
-  data**, which their names do not suggest. A tracker record's
-  `alarm_configuration` holds a geofence `lat`/`long`/`radius` (usually where
-  the vehicle is kept); every alarm record's `event` embeds
-  `latitude`/`longitude`, so an alarm list is a movement record of exactly the
-  moments that mattered. The `alarms` command prints neither — a test pins
-  that — and its `--help` carries the warning. Treat both responses with the
-  care spec §7.1 demands of the cache.
+- **`GET /api/v2/trackers` returns location data**, which its name does not
+  suggest: a record's `alarm_configuration` holds a geofence
+  `lat`/`long`/`radius` (usually where the vehicle is kept). `trackers` prints
+  only id and name. Treat the response with the care spec §7.1 demands of the
+  cache.
 - **`POST /api/v2/session/test_alarm` must never be called or implemented.**
   It fires a real alarm on a real vehicle. It is referenced in exactly one
   place, a comment in `client.py` saying why not, and `grep -r test_alarm`
@@ -419,11 +416,6 @@ Unofficial read-only client for the trackiwi GPS API. Spec:
   item/mutation routes (`/api/v2/tours/`, `/api/v2/markers/`,
   `/api/v2/marker_categories/`, `/api/v2/shares/`, `/api/v2/trackers/`) and
   `PUT /api/v2/session/push_token`.
-- **The six read-only list endpoints share `Client._get_list`.** Do not
-  reimplement the GET/`_check`/decode/insist-on-a-list sequence per method; six
-  copies is how the envelope handling drifts. None of them is cached in SQLite,
-  deliberately: they are small live reads and the cache exists for positions
-  only.
 - **`*.json` and `*.xml` are gitignored as track exports**, because
   `export --format geojson -o positions.json` is the natural filename and a
   GPX saved as `track.xml` is the same hole. A legitimate JSON/XML file needs

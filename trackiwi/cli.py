@@ -14,10 +14,8 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from .client import AuthError, Client, TrackiwiError
 from .export import FORMATS
@@ -172,7 +170,10 @@ def cmd_logout(_: argparse.Namespace) -> int:
 def cmd_trackers(_: argparse.Namespace) -> int:
     """Print each tracker's id and name, one per line."""
     for tracker in Client.load().trackers():
-        print(f"{tracker.get('id')}\t{tracker.get('name', '(unnamed)')}")
+        if not isinstance(tracker, dict):
+            print(_cell(tracker))
+            continue
+        print(f"{_cell(tracker.get('id'))}\t{_cell(tracker.get('name', '(unnamed)'))}")
     return 0
 
 
@@ -192,117 +193,6 @@ def _cell(value: object) -> str:
     for char in ("\t", "\r", "\n"):
         text = text.replace(char, " ")
     return text
-
-
-def _print_rows(records: list[Any], fields: tuple[str, ...]) -> None:
-    """Print one tab-separated line per record, in `fields` order.
-
-    `.get` throughout, deliberately: this is an undocumented API with no
-    deprecation policy (design spec, section 2), and two of the five endpoints
-    have an element shape that was never observed at all, so a renamed or
-    absent field must degrade to `-` rather than end the listing in a
-    `KeyError` traceback.
-    """
-    for record in records:
-        if not isinstance(record, dict):
-            # The endpoint promised a list of records; an element that is not
-            # one still prints rather than aborting the whole listing.
-            print(_cell(record))
-            continue
-        print("\t".join(_cell(record.get(field)) for field in fields))
-
-
-def _read_command(method: str, fields: tuple[str, ...]) -> Callable[[argparse.Namespace], int]:
-    """Build a `cmd_*` for one read-only list endpoint.
-
-    `Client.load` is a **classmethod returning a Client**, so the call below is
-    `Client.load().<method>()` — not an instance method on an already-built
-    client.
-    """
-
-    def command(_: argparse.Namespace) -> int:
-        _print_rows(getattr(Client.load(), method)(), fields)
-        return 0
-
-    return command
-
-
-#: `(subcommand, Client method, printed fields, help text)`.
-#:
-#: None of these is cached in SQLite. They are small live reads and the cache
-#: exists for positions only; adding tables for them would widen the most
-#: sensitive artefact this tool creates (design spec, section 7.1) for no gain.
-READ_COMMANDS = (
-    (
-        "tours",
-        "tours",
-        ("id", "name", "tracker_id", "started_at", "ended_at"),
-        "list recorded tours",
-    ),
-    (
-        "alarms",
-        "alarms",
-        ("id", "tracker_id", "alarm_type", "acknowledged", "inserted_at"),
-        "list alarms — WARNING: this is location history, see --help",
-    ),
-    (
-        "markers",
-        "markers",
-        ("id", "name"),
-        "list markers (field names unverified — see --help)",
-    ),
-    (
-        "marker-categories",
-        "marker_categories",
-        ("id", "name", "color"),
-        "list marker categories",
-    ),
-    (
-        "shares",
-        "shares",
-        ("id", "name"),
-        "list active shares (field names unverified — see --help)",
-    ),
-)
-
-#: Longer `--help` text, where a warning has room to be read.
-READ_DESCRIPTIONS = {
-    "alarms": (
-        "List the account's alarms, one per line: id, tracker, type, "
-        "whether it was acknowledged, and when it was recorded.\n\n"
-        "PRIVACY WARNING: an alarm list is itself a location history. Every "
-        "alarm record carries an 'event' object embedding latitude and "
-        "longitude, so this endpoint says where the vehicle was each time an "
-        "alarm fired — which, for a theft or geofence alarm, is precisely the "
-        "locations worth protecting. This command prints the fields above and "
-        "deliberately does not print those coordinates, but the underlying "
-        "records hold them, so treat the API response with the same care as "
-        "the position cache.\n\n"
-        "Read-only: nothing here acknowledges, clears or tests an alarm."
-    ),
-    "markers": (
-        "List the account's markers, one per line.\n\n"
-        "The element shape of this endpoint is UNVERIFIED: it answered with an "
-        "empty list on the account it was checked against, so 'id' and 'name' "
-        "are expectations rather than a confirmed contract. A field that does "
-        "not exist prints as '-'."
-    ),
-    "shares": (
-        "List the account's active shares, one per line.\n\n"
-        "The element shape of this endpoint is UNVERIFIED: it answered with an "
-        "empty list on the account it was checked against, so 'id' and 'name' "
-        "are expectations rather than a confirmed contract. A field that does "
-        "not exist prints as '-'.\n\n"
-        "Read-only: this lists shares, it cannot create or revoke one. Anyone "
-        "holding a share link can see the vehicle's position."
-    ),
-    "tours": (
-        "List recorded tours, one per line: id, name, tracker, start and end.\n\n"
-        "'started_at' and 'ended_at' are printed exactly as the API sends "
-        "them, which for this endpoint is an ISO 8601 string, not the epoch "
-        "integer the sync CSV uses."
-    ),
-}
 
 
 HEADING_DESCRIPTION = (
@@ -575,15 +465,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("logout", help="revoke the session").set_defaults(func=cmd_logout)
     sub.add_parser("trackers", help="list trackers").set_defaults(func=cmd_trackers)
-
-    for name, method, fields, help_text in READ_COMMANDS:
-        read = sub.add_parser(
-            name,
-            help=help_text,
-            description=READ_DESCRIPTIONS.get(name),
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-        )
-        read.set_defaults(func=_read_command(method, fields))
 
     sync = sub.add_parser("sync", help="fetch new positions into the local cache")
     sync.add_argument("--full", action="store_true", help="restart from the beginning")
