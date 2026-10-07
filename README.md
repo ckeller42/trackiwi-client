@@ -115,7 +115,7 @@ it cannot create or revoke one.
 Timestamps in these listings are printed exactly as the API sends them, which
 for these endpoints is an ISO 8601 string — *not* the epoch integer the
 position sync uses. Both forms occur in this API and mean the same kind of
-thing; see the units note below.
+thing; see [Field units](#field-units).
 
 ### Which way is the vehicle pointing?
 
@@ -154,22 +154,10 @@ available as `trackiwi.heading.estimate_heading()` for library use.
 
 ### Field units
 
-Worth knowing before you do arithmetic on an export, because the field names
-do not say it and the vendor documents nothing:
-
-- **`distance` is centimetres**, and it is a **per-fix delta, not an
-  odometer**. It is reported by the device from its own consecutive readings,
-  so it can disagree slightly with the distance you would compute from two
-  stored coordinates when a fix was dropped or GPS jittered.
-- **`voltage` is centivolts** — `1303` means 13.03 V.
-- **`fix_timezone` is an integer offset**, not a zone name. Its exact
-  interpretation is unconfirmed; nothing in this tool depends on it, because
-  every timestamp is handled and exported in UTC.
-- **`speed` is km/h, `altitude` is metres, `course` is degrees** clockwise
-  from true north. Verified against recorded drives: reported speed is 3.6×
-  the speed derived from consecutive positions, and the course matches the
-  bearing between fixes. The InfluxDB fields are named accordingly
-  (`speed_kmh`, `altitude_m`, `course_deg`).
+The field names do not say what unit they use, and the vendor documents nothing. Read the
+[position fields and units](https://ckeller42.github.io/trackiwi-client/reference/units.html)
+reference before doing arithmetic on an export. The two traps: `distance` is centimetres and a
+per-fix delta, not an odometer, and `voltage` is centivolts.
 
 `--from`/`--to` are inclusive UTC calendar days (`YYYY-MM-DD`); giving a `--to`
 before `--from` is rejected with an error rather than silently returning
