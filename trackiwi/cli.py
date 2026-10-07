@@ -42,19 +42,9 @@ def _write_atomically(path: str, text: str) -> None:
 
     Implements :need:`REQ_EXPORT_ATOMIC`.
 
-    Renders to a temporary file in the destination's own directory, then
-    `os.replace()`s it over the target. `os.replace` is atomic on the same
-    filesystem, so a failure never clobbers a good previous export with a
-    partial one.
-
-    If the destination is a symlink, the symlink is followed and its target
-    is updated in place, leaving the symlink intact. If the destination
-    exists, its mode is preserved on the replacement file. New files default
-    to 0600 for security (consistent with the cache database).
-
-    Any `OSError` (bad path, permissions, a directory where a file was
-    expected, ...) becomes a `TrackiwiError` so `main()` reports it cleanly
-    instead of leaking a traceback.
+    Renders to a temp file beside the target, then `os.replace()`s it over.
+    Symlinks are followed; an existing target keeps its mode, a new file is
+    0600. Any `OSError` becomes a `TrackiwiError`.
     """
     # Resolve the destination, following symlinks to their real path.
     real_target = Path(os.path.realpath(path))
@@ -83,14 +73,10 @@ def _write_atomically(path: str, text: str) -> None:
 
 
 def _silence_stderr() -> None:
-    """Point fd 2 at /dev/null so the interpreter's exit flush stays quiet.
+    """Point fd 2 at /dev/null so CPython's exit flush stays quiet.
 
-    Without this, a write to a closed pipe makes CPython print "Exception
-    ignored in: <_io.TextIOWrapper name='<stdout>'>" while flushing on exit,
-    after the command has already decided what to do about it (the idiom from
-    the Python docs' note on SIGPIPE). Under `capsys` the `fileno()` call
-    raises `io.UnsupportedOperation`, which is both an `OSError` and a
-    `ValueError` and is deliberately swallowed here.
+    `io.UnsupportedOperation` (e.g. under `capsys`) is an `OSError` and a
+    `ValueError`, and is swallowed.
     """
     with contextlib.suppress(OSError, ValueError):
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
@@ -99,10 +85,8 @@ def _silence_stderr() -> None:
 def _read_token() -> str:
     """Read a token for `--token -`, without it ever reaching argv.
 
-    A token given as `--token <value>` is written verbatim into the shell
-    history file and is visible in `ps -ww` to every process running as the
-    same user, for the lifetime of the command. Reading it from stdin touches
-    neither; on a terminal it is prompted for without echo.
+    `--token <value>` would land in shell history and `ps`; stdin does not.
+    On a terminal it is prompted for without echo.
     """
     token = getpass.getpass("trackiwi token: ") if sys.stdin.isatty() else sys.stdin.read()
     token = token.strip()
@@ -142,12 +126,8 @@ def cmd_logout(_: argparse.Namespace) -> int:
     try:
         client = Client.load()
     except TrackiwiError as error:
-        # Whatever makes the config unloadable (a non-https `api_base`,
-        # truncated JSON, a wrong type) must not keep the token on disk: it
-        # grants live vehicle location and `logout` is the only way to remove
-        # it (spec section 7.3). Revoking over a non-https base is not an
-        # option — sending the token in cleartext is the very thing
-        # `_require_https` prevents — so the local credential goes, loudly.
+        # Unloadable config must not keep the token on disk. No revoke: that
+        # could mean sending the token over a non-https base.
         Client.forget_local_session()
         print(
             f"Could not revoke the session: {error}\n"
@@ -172,10 +152,8 @@ def cmd_logout(_: argparse.Namespace) -> int:
 def _cell(value: object) -> str:
     """Render one field for a tab-separated listing.
 
-    A missing field prints as `-` rather than `None`, and a tab or newline
-    inside a server-supplied string is replaced with a space: a tour named
-    with an embedded tab would otherwise shift every following column, which
-    silently corrupts `cut -f`-style downstream use.
+    Missing prints as `-`; tabs and newlines in server text become spaces so
+    columns stay aligned.
     """
     if value is None:
         return "-"
@@ -190,16 +168,11 @@ def _cell(value: object) -> str:
 def _print_rows(records: list[Any], fields: tuple[str, ...]) -> None:
     """Print one tab-separated line per record, in `fields` order.
 
-    `.get` throughout, deliberately: this is an undocumented API with no
-    deprecation policy (design spec, section 2), and two of the five endpoints
-    have an element shape that was never observed at all, so a renamed or
-    absent field must degrade to `-` rather than end the listing in a
-    `KeyError` traceback.
+    Uses `.get` throughout: the API is undocumented, so a renamed or absent
+    field degrades to `-` instead of a `KeyError`.
     """
     for record in records:
         if not isinstance(record, dict):
-            # The endpoint promised a list of records; an element that is not
-            # one still prints rather than aborting the whole listing.
             print(_cell(record))
             continue
         print("\t".join(_cell(record.get(field)) for field in fields))
@@ -208,9 +181,7 @@ def _print_rows(records: list[Any], fields: tuple[str, ...]) -> None:
 def _read_command(method: str, fields: tuple[str, ...]) -> Callable[[argparse.Namespace], int]:
     """Build a `cmd_*` for one read-only list endpoint.
 
-    `Client.load` is a **classmethod returning a Client**, so the call below is
-    `Client.load().<method>()` — not an instance method on an already-built
-    client.
+    Calls `Client.load().<method>()`.
     """
 
     def command(_: argparse.Namespace) -> int:
@@ -222,9 +193,7 @@ def _read_command(method: str, fields: tuple[str, ...]) -> Callable[[argparse.Na
 
 #: `(subcommand, Client method, printed fields, help text)`.
 #:
-#: None of these is cached in SQLite. They are small live reads and the cache
-#: exists for positions only; adding tables for them would widen the most
-#: sensitive artefact this tool creates (design spec, section 7.1) for no gain.
+#: None of these is cached; the cache holds positions only.
 READ_COMMANDS = (
     ("trackers", "trackers", ("id", "name"), "list trackers"),
     (
@@ -335,14 +304,11 @@ HEADING_DESCRIPTION = (
 def _sync_into_cache(client: Client, full: bool) -> None:
     """Fetch new positions into the local cache, reporting progress."""
     if not client.authenticated:
-        # Checked before Store() is ever opened: otherwise an unauthenticated
-        # run leaves behind an empty cache directory and database file.
+        # Before Store(): an unauthenticated run must not create the cache.
         raise AuthError("not logged in — run 'trackiwi login'")
     with Store() as store:
         offset = None if full else store.max_id()
-        # `fetched` drives the progress line, because that is what the server's
-        # total is comparable with; `written` counts rows that were actually
-        # new, which is what gets reported at the end.
+        # `fetched` is comparable with the server's total; `written` is new rows only.
         fetched = written = skipped_total = 0
         try:
             for rows, skipped, total in client.sync(offset=offset):
@@ -352,8 +318,7 @@ def _sync_into_cache(client: Client, full: bool) -> None:
                 suffix = f" of {total}" if total else ""
                 print(f"\rsynced {fetched}{suffix} positions", end="", file=sys.stderr)
         finally:
-            # Always close the \r-progress line, success or failure, so a
-            # later error message never gets appended to a partial line.
+            # Close the \r-progress line so later messages start clean.
             print(file=sys.stderr)
         if skipped_total:
             print(f"skipped {skipped_total} malformed rows", file=sys.stderr)
@@ -374,17 +339,15 @@ def cmd_influx_check(_: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _push() -> int:
-    """Mirror new cached rows to InfluxDB and return how many were sent."""
+def _push() -> None:
+    """Mirror new cached rows to InfluxDB."""
     writer = InfluxWriter(load_config())
     if not default_db_path().exists():
-        # Never create the cache as a side effect: it is a movement history.
         print("nothing cached yet — run 'trackiwi sync' first")
-        return 0
+        return
     with Store() as store:
         sent = mirror(store, writer)
     print(f"pushed {sent} positions to InfluxDB")
-    return sent
 
 
 def cmd_influx_push(_: argparse.Namespace) -> int:
@@ -396,13 +359,9 @@ def cmd_influx_push(_: argparse.Namespace) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Sync from trackiwi, refresh tracker names, then push to InfluxDB.
 
-    The three steps fail independently. The push runs even when the sync or
-    the name refresh fails: the cache is the buffer, and whatever is already
-    in it should still reach InfluxDB. Each failure is reported on its own
-    ("sync failed" / "tracker names not refreshed"). The first trackiwi-side
-    error is re-raised afterwards so the exit code still reports it (2 for
-    auth, 1 else); when the push fails too, its error is printed and the
-    trackiwi-side error still decides the exit code.
+    The steps fail independently: the push runs even if sync or the name
+    refresh failed. The first trackiwi-side error is re-raised at the end and
+    decides the exit code, even when the push also fails.
     """
     trackiwi_error: TrackiwiError | None = None
     client: Client | None = None
@@ -412,11 +371,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     except TrackiwiError as error:
         trackiwi_error = error
         print(f"sync failed: {error}", file=sys.stderr)
-    # Names are refreshed whether or not the sync got through: without them
-    # `mirror` refuses to push. A cached tracker the API does not name (empty
-    # name, or gone from the account) gets a stable fallback, but only here,
-    # after `trackers()` answered: otherwise one such tracker would stall the
-    # mirror for every tracker.
+    # Refresh names even if sync failed: `mirror` needs them. Fallback names
+    # are assigned only after `trackers()` answered.
     if client is not None and not isinstance(trackiwi_error, AuthError):
         try:
             trackers = client.trackers()
@@ -448,19 +404,12 @@ def cmd_export(args: argparse.Namespace) -> int:
         with Store() as store:
             rows = store.query(tracker_id=args.tracker, start=start, end=end)
     else:
-        # Never create the cache as a side effect of a read-only command: the
-        # file is a movement history, and an export has nothing to put in it.
         rows = []
     try:
         text = FORMATS[args.format](rows)
     except (ValueError, OverflowError, OSError) as error:
-        # The exporters are pure, so they raise plain exceptions: a `fix_at`
-        # outside `datetime`'s range, or a non-finite coordinate, cached before
-        # those were rejected at parse time. Convert at this boundary rather
-        # than letting it escape main() as a traceback. Both schema-bearing
-        # formats raise on a non-finite coordinate (GPX since `lat="inf"` is
-        # not a valid `xsd:decimal`, GeoJSON since `Infinity` is not valid
-        # JSON); `csv` is a raw dump of the cache and passes the value on.
+        # Rows cached with an out-of-range `fix_at` or non-finite coordinate
+        # make GPX/GeoJSON raise; `csv` is a raw dump and does not.
         raise TrackiwiError(f"cached data cannot be exported: {error}") from error
     if args.output:
         _write_atomically(args.output, text)
@@ -469,11 +418,7 @@ def cmd_export(args: argparse.Namespace) -> int:
     try:
         sys.stdout.write(text)
     except BrokenPipeError:
-        # `trackiwi export --format csv | head`: the reader is gone, which is
-        # not an error — the export is the payload and the reader took what it
-        # wanted. This is the *only* place a dead pipe means success; handling
-        # it for the whole dispatch made `trackiwi sync 2>&1 | head -1` report
-        # a sync that stopped after its first page as exit 0.
+        # `export | head`: the reader left; the only place a dead pipe is success.
         _silence_stderr()
     return 0
 
@@ -481,11 +426,8 @@ def cmd_export(args: argparse.Namespace) -> int:
 def _heading_line(tracker_id: object, heading: Heading) -> str:
     """Render one tracker's estimate as a tab-separated line.
 
-    Columns: tracker id, degrees (one decimal, ``-`` when unknown), state,
-    source, when the vehicle last moved (UTC, ``-`` when never), and how long
-    it has been parked in seconds (``-`` while moving or unknown). Nothing
-    here is a coordinate: the heading says which way the vehicle points, not
-    where it is.
+    Columns: tracker id, degrees (one decimal), state, source, last moved
+    (UTC), parked seconds; ``-`` when unknown. No coordinates.
     """
     degrees = "-" if heading.degrees is None else f"{heading.degrees:.1f}"
     moved_at = (
@@ -510,11 +452,8 @@ def cmd_heading(args: argparse.Namespace) -> int:
 
     Implements :need:`REQ_HEADING_ESTIMATE` and :need:`REQ_HEADING_STATE`.
 
-    Pure arithmetic over the cache: no request is made, and like `export` the
-    command never creates the cache as a side effect. Without a cache there
-    is nothing to estimate; with ``--tracker`` an id with no rows still prints
-    an ``unknown`` line, so a script reading the output sees a row per
-    requested tracker.
+    Offline and never creates the cache. ``--tracker`` with no rows still
+    prints an ``unknown`` line.
     """
     if args.stale_after < 0:
         raise TrackiwiError("--stale-after must be zero or more seconds")
@@ -543,14 +482,8 @@ def cmd_purge(args: argparse.Namespace) -> int:
     path = default_db_path()
     if not args.yes:
         raise TrackiwiError(f"this deletes {path} — pass --yes to confirm")
-    # Unlink without opening the database. Opening it first meant a corrupt
-    # cache raised in `Store.__enter__` before the delete ever happened —
-    # failing in exactly the case where a user most wants the movement history
-    # gone (spec section 7.1) — and on a machine that had never synced it
-    # created the file just to delete it again.
-    # The sidecar files are deleted too: a journal left behind by a crashed
-    # write holds position rows just like the database does. `cache_files` is
-    # shared with `Store.purge()` so the two cannot drift apart again.
+    # Never open the database (it may be corrupt). Sidecars go too: a leftover
+    # journal holds position rows.
     for target in cache_files(path):
         try:
             target.unlink(missing_ok=True)
@@ -639,8 +572,7 @@ def main(argv: list[str] | None = None) -> int:
     """Dispatch a command and map the project's exceptions to exit codes."""
     args = build_parser().parse_args(argv)
     try:
-        # `args.func` is an argparse attribute, so it is `Any`; the local pins
-        # the exit code every `cmd_*`/`command` returns back to `int`.
+        # `args.func` is `Any`; the annotation pins the exit code to `int`.
         exit_code: int = args.func(args)
         return exit_code
     except AuthError as error:
@@ -651,12 +583,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     except BrokenPipeError:
-        # Reaching here means a dead pipe somewhere that is *not* the export
-        # payload — `cmd_sync`'s progress line on a closed stderr, say, which
-        # `trackiwi sync 2>&1 | head -1` produces. The command did not finish,
-        # so it must not claim success: returning 0 made a wrapper's
-        # `trackiwi sync && trackiwi export` run on a partial sync. Nothing is
-        # printed because the stream to print on is what just failed.
+        # A dead pipe outside the export payload means an unfinished command:
+        # exit 1. Nothing is printed; the stream just failed.
         _silence_stderr()
         return 1
     except KeyboardInterrupt:

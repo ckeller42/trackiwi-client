@@ -13,38 +13,22 @@ import math
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any
 
-from . import COLUMNS, __version__
+from . import COLUMNS, Row, __version__
 
 GPX_NS = "http://www.topografix.com/GPX/1/1"
-
-
-class Row(Protocol):
-    """A position row addressed by column name.
-
-    The exporters accept both a `sqlite3.Row` (what `store.query` returns) and a
-    plain `dict` (what the doctests and callers build); both answer `row["name"]`
-    for a column, so that is all this contract promises. Values are `Any` because
-    the cache stores heterogeneous columns (ints, floats, `None`).
-    """
-
-    def __getitem__(self, key: str) -> Any: ...
 
 
 def _iso(fix_at: int) -> str:
     return datetime.fromtimestamp(fix_at, tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
+def by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
     """Group rows by `tracker_id`, keeping each tracker's rows in input order.
 
-    An export without `--tracker` covers every tracker (design spec, section 6)
-    and `store.query()` orders by `fix_at, id`, so several devices' rows arrive
-    interleaved. Merging them into one track or one LineString would produce a
-    geometry that teleports between devices on every other point, so each
-    tracker gets its own track / feature. Group order is first appearance —
-    i.e. earliest fix — which keeps the output deterministic.
+    `store.query()` interleaves trackers by time; exporters need one track per
+    tracker. Group order is first appearance (earliest fix).
     """
     grouped: dict[Any, list[Row]] = {}
     for row in rows:
@@ -55,16 +39,10 @@ def _by_tracker(rows: Sequence[Row]) -> dict[Any, list[Row]]:
 def _finite(row: Row) -> tuple[float, float]:
     """Return `(latitude, longitude)`, rejecting a non-finite pair.
 
-    Implements :need:`REQ_GEOJSON_VALID` and :need:`REQ_MALFORMED_SKIP` (the
-    export-side second layer for rows cached before parse-time checks existed).
+    Implements :need:`REQ_GEOJSON_VALID` and :need:`REQ_MALFORMED_SKIP`.
 
-    A coordinate is checked at parse time, so this only ever fires for a row
-    that reached the cache *before* that check existed — a real population,
-    since the client has been runnable throughout. `inf` is not a valid
-    `xsd:decimal`, so `f"{inf:.6f}"` produced `lat="inf"`: schema-invalid GPX,
-    written silently with exit 0. GeoJSON already refused such a row
-    (`allow_nan=False`), and `cmd_export` converts the `ValueError` into a
-    clean message, which is what its own comment claims for both formats.
+    Parse time already rejects these; this guards rows cached earlier. `inf`
+    is not a valid `xsd:decimal`. `cmd_export` converts the `ValueError`.
     """
     latitude, longitude = row["latitude"], row["longitude"]
     if not math.isfinite(latitude) or not math.isfinite(longitude):
@@ -91,7 +69,7 @@ def to_gpx(rows: Sequence[Row]) -> str:
         "gpx",
         {"version": "1.1", "creator": f"trackiwi-client/{__version__}", "xmlns": GPX_NS},
     )
-    for tracker_id, tracker_rows in _by_tracker(rows).items():
+    for tracker_id, tracker_rows in by_tracker(rows).items():
         trk = ET.SubElement(gpx, "trk")
         ET.SubElement(trk, "name").text = f"tracker {tracker_id}"
         seg = ET.SubElement(trk, "trkseg")
@@ -113,9 +91,7 @@ def to_geojson(rows: Sequence[Row]) -> str:
     Implements :need:`REQ_EXPORT_PER_TRACKER` and :need:`REQ_GEOJSON_VALID`.
 
     A tracker with a single fix becomes a `Point`, one with several a
-    `LineString`. Each Feature carries its `tracker_id` in `properties` so a
-    consumer can tell the devices apart — GPX and GeoJSON used to drop it
-    entirely, which made a multi-tracker export impossible to split up again.
+    `LineString`. Each Feature carries its `tracker_id` in `properties`.
 
     >>> import json
     >>> rows = [
@@ -133,7 +109,7 @@ def to_geojson(rows: Sequence[Row]) -> str:
     7
     """
     features: list[dict[str, Any]] = []
-    for tracker_id, tracker_rows in _by_tracker(rows).items():
+    for tracker_id, tracker_rows in by_tracker(rows).items():
         coordinates = [[row["longitude"], row["latitude"]] for row in tracker_rows]
         geometry: dict[str, Any]
         if len(coordinates) == 1:
@@ -152,9 +128,7 @@ def to_geojson(rows: Sequence[Row]) -> str:
                 },
             }
         )
-    # allow_nan=False: `Infinity`/`NaN` are not valid JSON (RFC 8259), so a
-    # non-finite coordinate must raise here rather than produce a document
-    # strict parsers reject wholesale.
+    # allow_nan=False: non-finite coordinates raise instead of emitting invalid JSON.
     return (
         json.dumps({"type": "FeatureCollection", "features": features}, indent=2, allow_nan=False)
         + "\n"

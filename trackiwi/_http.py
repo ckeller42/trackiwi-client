@@ -3,12 +3,13 @@
 Both transports import this module and neither imports the other. It holds
 what they would otherwise each carry a copy of: the opener that refuses
 redirects, the ``User-Agent``, and the conversion of urllib's exceptions.
-Redaction is not here: each transport knows its own secrets.
+Redaction lives here too, so both transports scrub the same way.
 """
 
 from __future__ import annotations
 
 import http.client
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -18,6 +19,25 @@ from typing import Any
 from . import TrackiwiError, __version__
 
 USER_AGENT = f"trackiwi-client/{__version__} (+python-urllib)"
+
+#: Anything that looks like an auth credential in server-controlled text.
+_AUTH_RE = re.compile(r"\b(Token|Bearer|Basic)\s+\S+", re.IGNORECASE)
+
+
+def redact(text: str, *secrets: str | None) -> str:
+    """Strip auth credentials from text that is about to be shown.
+
+    Implements :need:`REQ_TOKEN_NEVER_LOGGED`.
+
+    Proxies and API gateways echo request headers into 4xx/5xx bodies, and the
+    CLI prints those to stderr. Any ``Token``/``Bearer``/``Basic`` value is
+    scrubbed, then each given secret wherever it appears on its own.
+    """
+    text = _AUTH_RE.sub(lambda m: f"{m.group(1)} <redacted>", text)
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "<redacted>")
+    return text
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
