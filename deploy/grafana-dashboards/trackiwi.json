@@ -109,7 +109,8 @@
         "basemap": { "type": "osm-standard", "name": "OpenStreetMap", "config": {} },
         "view": { "id": "fit", "zoom": 13 },
         "layers": [
-          { "type": "markers", "name": "Position", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" } }
+          { "type": "markers", "name": "Position", "location": { "mode": "coords", "latitude": "lat", "longitude": "lon" },
+            "config": { "showLegend": false, "style": { "color": { "fixed": "#e34948" }, "size": { "fixed": 14, "min": 2, "max": 15 }, "opacity": 1 } } }
         ]
       },
       "targets": [
