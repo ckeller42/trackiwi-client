@@ -27,6 +27,7 @@ project_copyright = "2026, Christoph Keller"
 
 extensions = [
     "sphinx_needs",
+    "sphinxcontrib.mermaid",
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.doctest",
