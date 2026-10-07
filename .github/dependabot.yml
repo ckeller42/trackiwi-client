@@ -1,14 +1,53 @@
 # Weekly bumps. `pip` covers the [dev] extra; the package itself has zero runtime dependencies.
+#
+# Grouping notes:
+# - Only minor/patch updates are grouped; majors stay one PR each. The
+#   dependabot-auto-merge workflow merges a PR only when none of its commit
+#   trailers is semver-major, so a major inside a group would block the whole
+#   group from auto-merging.
+# - ruff is pinned twice (`ruff==` in pyproject.toml's [dev] extra, and the
+#   ruff-pre-commit `rev` in .pre-commit-config.yaml) and the two must match.
+#   A group cannot span ecosystems, so the cross-ecosystem `ruff` group below
+#   carries both bumps in one PR. It is excluded from the per-ecosystem groups.
+# - With `multi-ecosystem-group` set an entry may not set `commit-message`, so the
+#   `chore` prefix is on the ruff group only; the other pip / pre-commit PRs use
+#   Dependabot's default title prefix.
+# - cooldown applies to version updates only; security updates ignore it.
 version: 2
+multi-ecosystem-groups:
+  ruff:
+    schedule: { interval: weekly }
+    commit-message: { prefix: chore }
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    commit-message: { prefix: chore }
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
   - package-ecosystem: pip
     directory: /
     schedule: { interval: weekly }
-  # Hook revs in .pre-commit-config.yaml. ruff's `ruff==` pin in [dev] is the
-  # pip ecosystem's job and must be kept in step by hand (see AGENTS.md).
+    cooldown: { default-days: 7 }
+    multi-ecosystem-group: ruff
+    patterns: ["ruff"]
+    groups:
+      dev-tools:
+        patterns: ["*"]
+        exclude-patterns: ["ruff"]
+        update-types: [minor, patch]
+  # Hook revs in .pre-commit-config.yaml.
   - package-ecosystem: pre-commit
     directory: /
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }
+    multi-ecosystem-group: ruff
+    patterns: ["*ruff-pre-commit*"]
+    groups:
+      hooks:
+        patterns: ["*"]
+        exclude-patterns: ["*ruff-pre-commit*"]
+        update-types: [minor, patch]
