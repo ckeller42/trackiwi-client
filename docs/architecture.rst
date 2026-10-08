@@ -1,8 +1,7 @@
 Architecture
 ============
 
-The architecture, structured after `arc42 <https://arc42.org>`_ and drawn in the `C4 model <https://c4model.com>`_
-with `LikeC4 <https://likec4.dev>`_: goals and constraints first, then context, containers and
+The architecture: goals and constraints first, then context, containers and
 components, how one ``ingest`` run flows, how it is deployed and what the
 cache holds, then the crosscutting concepts, decisions, quality, risks and glossary. The code level is the :doc:`api`. Requirement ids (``REQ_…``) link
 to :doc:`requirements`.
