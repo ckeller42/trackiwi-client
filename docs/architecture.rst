@@ -18,34 +18,11 @@ trackiwi-client pulls the positions of a personal trackiwi GPS tracker out of th
 and keeps them on hardware the owner controls: a local SQLite cache, exports as GPX, GeoJSON or
 CSV, and optionally an InfluxDB bucket that Grafana draws. It is unofficial and unaffiliated.
 
-.. list-table::
-   :widths: 36 36
-   :header-rows: 1
-
-   -
-
-      - Goal
-      - What it means
-   -
-
-      - Read-only
-      - Against the trackiwi API, the only request that changes state is the logout ``DELETE /api/v2/session``. :need:`REQ_READONLY`
-   -
-
-      - Private by construction
-      - The token and the cache are the most sensitive things it handles: owner-only files, no token in output, no private data in the repository. :need:`REQ_TOKEN_NEVER_LOGGED`, :need:`REQ_CACHE_MODE_0600`, :need:`REQ_NO_PRIVATE_DATA`
-   -
-
-      - Resumable
-      - Any interruption is repaired by running the same command again. :need:`REQ_SYNC_RESUME`, :need:`REQ_MIRROR_RESUME`
-   -
-
-      - Nothing to install
-      - The package imports only the standard library. :need:`REQ_ZERO_DEPS`
-   -
-
-      - Honest data
-      - A row that cannot be trusted is skipped and counted, never stored or guessed. :need:`REQ_MALFORMED_SKIP`
+-  **Read-only.** Against the trackiwi API, the only request that changes state is the logout ``DELETE /api/v2/session``. :need:`REQ_READONLY`
+-  **Private by construction.** The token and the cache are the most sensitive things it handles: owner-only files, no token in output, no private data in the repository. :need:`REQ_TOKEN_NEVER_LOGGED`, :need:`REQ_CACHE_MODE_0600`, :need:`REQ_NO_PRIVATE_DATA`
+-  **Resumable.** Any interruption is repaired by running the same command again. :need:`REQ_SYNC_RESUME`, :need:`REQ_MIRROR_RESUME`
+-  **Nothing to install.** The package imports only the standard library. :need:`REQ_ZERO_DEPS`
+-  **Honest data.** A row that cannot be trusted is skipped and counted, never stored or guessed. :need:`REQ_MALFORMED_SKIP`
 
 Constraints
 -----------
@@ -65,42 +42,13 @@ Constraints
 Solution strategy
 -----------------
 
-.. list-table::
-   :widths: 36 36
-   :header-rows: 1
-
-   -
-
-      - Problem
-      - Approach
-   -
-
-      - The API can change or lie
-      - Parse defensively, skip and count bad rows, fail loudly on a page that makes no progress. :need:`REQ_SYNC_FAIL_LOUD`, :need:`REQ_SYNC_PAST_MALFORMED`
-   -
-
-      - Runs get interrupted
-      - Offset-based sync from the highest stored id; per-target mirror position stored after each acknowledged batch. No retry logic: re-running is the retry.
-   -
-
-      - The token must not leak
-      - One redaction helper for every message built from server text; tokens only via stdin; owner-only files. :need:`REQ_TOKEN_NEVER_LOGGED`
-   -
-
-      - Redirects can carry the token away
-      - A shared opener refuses every redirect, and a 3xx is an error. :need:`REQ_NO_REDIRECTS`
-   -
-
-      - It must not change the vendor account
-      - No write code exists beyond logout; the app-command response header is ignored. :need:`REQ_READONLY`, :need:`REQ_IGNORE_APP_COMMAND`
-   -
-
-      - Foreign exceptions look like bugs
-      - Converted to ``TrackiwiError`` at each module boundary, so ``main()`` catches only the project’s exceptions.
-   -
-
-      - Requirements must stay true
-      - Each requirement is a ``sphinx-needs`` object traced to a test; the docs build fails under ``-W`` if one is unverified.
+-  **The API can change or lie.** Parse defensively, skip and count bad rows, fail loudly on a page that makes no progress. :need:`REQ_SYNC_FAIL_LOUD`, :need:`REQ_SYNC_PAST_MALFORMED`
+-  **Runs get interrupted.** :term:`Offset`-based sync from the highest stored id; per-target :term:`mirror position` stored after each acknowledged batch. No retry logic: re-running is the retry.
+-  **The token must not leak.** One redaction helper for every message built from server text; tokens only via stdin; owner-only files. :need:`REQ_TOKEN_NEVER_LOGGED`
+-  **Redirects can carry the token away.** A shared opener refuses every redirect, and a 3xx is an error. :need:`REQ_NO_REDIRECTS`
+-  **It must not change the vendor account.** No write code exists beyond logout; the app-command response header is ignored. :need:`REQ_READONLY`, :need:`REQ_IGNORE_APP_COMMAND`
+-  **Foreign exceptions look like bugs.** Converted to ``TrackiwiError`` at each module boundary, so ``main()`` catches only the project’s exceptions.
+-  **Requirements must stay true.** Each requirement is a ``sphinx-needs`` object traced to a test; the docs build fails under ``-W`` if one is unverified.
 
 System context
 --------------
@@ -341,98 +289,38 @@ Decisions
 Decisions that shaped the design, with the rule that now enforces each. Dated design specs live
 locally and are not part of the repository.
 
-.. list-table::
-   :widths: 24 24 24
-   :header-rows: 1
-
-   -
-
-      - Decision
-      - Reason
-      - Enforced by
-   -
-
-      - Standard library only
-      - Nothing to install on a small host, a small supply-chain surface for a tool that holds a location token.
-      - :need:`REQ_ZERO_DEPS`
-   -
-
-      - Read-only client
-      - A bug must not be able to disarm an alarm, publish a share or edit a tour. ``test_alarm`` and the trailing-slash item routes are never called.
-      - :need:`REQ_READONLY`
-   -
-
-      - API base from the login response, https only
-      - The server decides where the API lives, and a plain-HTTP base would send the bearer token in cleartext.
-      - :need:`REQ_API_BASE_FROM_LOGIN`, :need:`REQ_API_BASE_HTTPS`
-   -
-
-      - No redirects
-      - urllib would copy the token onto the redirected request, and a login page would read as a successful empty answer.
-      - :need:`REQ_NO_REDIRECTS`
-   -
-
-      - Ignore the ``trackiwi-app-command`` header
-      - The official app executes it; this client never acts on server instructions.
-      - :need:`REQ_IGNORE_APP_COMMAND`
-   -
-
-      - Offset sync without retry logic
-      - The offset makes a re-run the retry; a loop would hide failures.
-      - :need:`REQ_SYNC_RESUME`
-   -
-
-      - The cache is the buffer for the mirror
-      - InfluxDB or the network can be down; positions wait in SQLite.
-      - :need:`REQ_MIRROR_RESUME`
-   -
-
-      - Scoped ingest token, loopback ports
-      - The container never sees the operator token; nothing is exposed by accident.
-      - :need:`REQ_DEPLOY_LEAST_EXPOSURE`
-   -
-
-      - Parked heading is an inference
-      - The feed has no compass; the estimate says how far to trust it.
-      - :need:`REQ_HEADING_ESTIMATE`, :need:`REQ_HEADING_STATE`
+-  **Standard library only.** Nothing to install on a small host, a small supply-chain surface for a tool that holds a location token.
+   Enforced by: :need:`REQ_ZERO_DEPS`
+-  **Read-only client.** A bug must not be able to disarm an alarm, publish a share or edit a tour. ``test_alarm`` and the trailing-slash item routes are never called.
+   Enforced by: :need:`REQ_READONLY`
+-  **API base from the login response, https only.** The server decides where the API lives, and a plain-HTTP base would send the bearer token in cleartext.
+   Enforced by: :need:`REQ_API_BASE_FROM_LOGIN`, :need:`REQ_API_BASE_HTTPS`
+-  **No redirects.** urllib would copy the token onto the redirected request, and a login page would read as a successful empty answer.
+   Enforced by: :need:`REQ_NO_REDIRECTS`
+-  **Ignore the ``trackiwi-app-command`` header.** The official app executes it; this client never acts on server instructions.
+   Enforced by: :need:`REQ_IGNORE_APP_COMMAND`
+-  **Offset sync without retry logic.** The offset makes a re-run the retry; a loop would hide failures.
+   Enforced by: :need:`REQ_SYNC_RESUME`
+-  **The cache is the buffer for the mirror.** InfluxDB or the network can be down; positions wait in SQLite.
+   Enforced by: :need:`REQ_MIRROR_RESUME`
+-  **Scoped ingest token, loopback ports.** The container never sees the operator token; nothing is exposed by accident.
+   Enforced by: :need:`REQ_DEPLOY_LEAST_EXPOSURE`
+-  **Parked heading is an inference.** The feed has no compass; the estimate says how far to trust it.
+   Enforced by: :need:`REQ_HEADING_ESTIMATE`, :need:`REQ_HEADING_STATE`
 
 Quality
 -------
 
-.. list-table::
-   :widths: 24 24 24
-   :header-rows: 1
-
-   -
-
-      - Quality
-      - Scenario
-      - How it is checked
-   -
-
-      - Safety
-      - No code path other than logout changes state at trackiwi.
-      - :need:`REQ_READONLY`, an invariant test in ``tests/test_invariants.py``
-   -
-
-      - Privacy
-      - A secret or position data is never committed.
-      - Three scanners (gitleaks, detect-secrets, ``tools/check_no_private_data.py``) in pre-commit and CI
-   -
-
-      - Reliability
-      - Kill a sync or a push at any point, run it again, end with the same state.
-      - :need:`REQ_SYNC_RESUME`, :need:`REQ_MIRROR_RESUME`
-   -
-
-      - Maintainability
-      - Strict typing, full docstring coverage, 95 percent test coverage.
-      - ``mypy --strict``, ``interrogate``, ``pytest --cov-fail-under=95`` in ``tools/ci.sh`` and CI
-   -
-
-      - Documentation truth
-      - A requirement without a test, or a dangling ``:need:`` reference, fails the build.
-      - ``sphinx-build -b html -W docs docs/_build/html`` in CI
+-  **Safety.** No code path other than logout changes state at trackiwi.
+   How it is checked: :need:`REQ_READONLY`, an invariant test in ``tests/test_invariants.py``
+-  **Privacy.** A secret or position data is never committed.
+   How it is checked: Three scanners (gitleaks, detect-secrets, ``tools/check_no_private_data.py``) in pre-commit and CI
+-  **Reliability.** Kill a sync or a push at any point, run it again, end with the same state.
+   How it is checked: :need:`REQ_SYNC_RESUME`, :need:`REQ_MIRROR_RESUME`
+-  **Maintainability.** Strict typing, full docstring coverage, 95 percent test coverage.
+   How it is checked: ``mypy --strict``, ``interrogate``, ``pytest --cov-fail-under=95`` in ``tools/ci.sh`` and CI
+-  **Documentation truth.** A requirement without a test, or a dangling ``:need:`` reference, fails the build.
+   How it is checked: ``sphinx-build -b html -W docs docs/_build/html`` in CI
 
 Risks and technical debt
 ------------------------
@@ -453,43 +341,5 @@ Risks and technical debt
 Glossary
 --------
 
-.. list-table::
-   :widths: 36 36
-   :header-rows: 1
-
-   -
-
-      - Term
-      - Meaning
-   -
-
-      - Tracker
-      - A GPS device on the trackiwi account, identified by an integer id.
-   -
-
-      - Position, fix
-      - One reported location row of a tracker, with a server id and a ``fix_at`` time.
-   -
-
-      - Offset
-      - The id after which the next sync page starts; exclusive.
-   -
-
-      - Cache
-      - The local SQLite database of positions.
-   -
-
-      - Mirror
-      - The step that sends cached positions to InfluxDB.
-   -
-
-      - Mirror position
-      - The highest id acknowledged by one InfluxDB target, stored per target in ``mirror_state``.
-   -
-
-      - Ingest
-      - ``sync``, refresh tracker names, then mirror: what a timer runs.
-   -
-
-      - Requirement
-      - A ``sphinx-needs`` object with a ``REQ_`` id, traced to its verifying tests.
+The terms used on this page, such as tracker, offset and mirror position, are defined in the
+:doc:`reference/glossary`.

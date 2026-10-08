@@ -31,6 +31,7 @@ short front door.
    reference/cli
    reference/units
    reference/exports
+   reference/glossary
    requirements
    traceability
    api
