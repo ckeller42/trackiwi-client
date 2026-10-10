@@ -383,6 +383,7 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
         rows = store.rows_after(last, batch_size)
         if not rows:
             return sent
+        lines = []
         for row in rows:
             tracker_id = int(row["tracker_id"])
             if not names.get(tracker_id):
@@ -390,8 +391,17 @@ def mirror(store: Store, writer: WriterProtocol, batch_size: int = BATCH_SIZE) -
                     f"no name known for tracker {tracker_id} — run `trackiwi ingest` "
                     "while trackiwi is reachable"
                 )
-        lines = [format_point(row, names[int(row["tracker_id"])]) for row in rows]
-        writer.write(lines)
+            try:
+                lines.append(format_point(row, names[tracker_id]))
+            except ValueError as exc:
+                # A legacy row with a non-finite value must not wedge the mirror
+                # (#22, REQ_MALFORMED_SKIP): skip and count it, keep advancing.
+                print(
+                    f"warning: skipped malformed cached row {int(row['id'])}: {exc}",
+                    file=sys.stderr,
+                )
+        if lines:
+            writer.write(lines)
         last = int(rows[-1]["id"])
         store.set_mirror_position(target, last)
-        sent += len(rows)
+        sent += len(lines)

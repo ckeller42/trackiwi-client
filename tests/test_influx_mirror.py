@@ -130,6 +130,26 @@ def test_rows_without_a_stored_name_stop_before_their_batch(tmp_path):
     )
 
 
+def test_a_non_finite_legacy_row_is_skipped_not_fatal(tmp_path, capsys):
+    """A legacy row with a non-finite value must not wedge the mirror (#22).
+
+    Rows from before the parse-time checks can hold inf/nan. `format_point`
+    rejects them; `mirror` skips and counts the row (REQ_MALFORMED_SKIP) and
+    still advances past it, rather than crashing out of `main()`.
+    """
+    import math
+
+    bad = _row(2)
+    bad = bad[:7] + (math.inf,) + bad[8:]  # speed = inf
+    with _cache(tmp_path) as store:
+        store.upsert([_row(1), bad, _row(3)])
+        writer = FakeWriter()
+        assert mirror(store, writer, batch_size=10) == 2
+        assert store.mirror_position(writer.target_key()) == 3
+    assert _ids(writer.batches[0]) == [1, 3]
+    assert "2" in capsys.readouterr().err
+
+
 def test_no_names_at_all_sends_nothing(tmp_path):
     with Store(tmp_path / "p.db") as store:
         store.upsert([_row(1)])
