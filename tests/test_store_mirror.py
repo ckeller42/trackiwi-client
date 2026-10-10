@@ -30,12 +30,15 @@ def test_rows_after_pages_in_id_order(tmp_path):
         assert store.rows_after(4, 10) == []
 
 
-def test_tracker_names_round_trip_and_update(tmp_path):
+def test_the_first_real_name_is_pinned_and_a_rename_does_not_replace_it(tmp_path):
+    """#24: tracker_name is part of the InfluxDB series key, so replacing a
+    real name on a rename would split the series. The first real name is
+    pinned; a later, different name is ignored."""
     with Store(tmp_path / "p.db") as store:
         assert store.tracker_names() == {}
         store.set_tracker_names({7: "Bus", 8: "Car"})
         store.set_tracker_names({7: "Van"})
-        assert store.tracker_names() == {7: "Van", 8: "Car"}
+        assert store.tracker_names() == {7: "Bus", 8: "Car"}
 
 
 def test_a_cached_tracker_without_a_name_gets_the_fallback(tmp_path):

@@ -215,9 +215,20 @@ class Store:
         )
 
     def set_tracker_names(self, names: Mapping[int, str]) -> None:
-        """Store the display name of each tracker id, replacing old names."""
+        """Pin each tracker's first real name; upgrade a fallback to a real one.
+
+        ``tracker_name`` is part of the InfluxDB series key, so replacing a real
+        name when a tracker is renamed would split its history into two series
+        and defeat idempotent re-mirroring (#24, :need:`REQ_MIRROR_IDEMPOTENT`).
+        The first real name is therefore kept; a later, different name is
+        ignored. The one exception is the ``tracker <id>`` fallback from
+        `name_unnamed_trackers`, which a real name still replaces
+        (:need:`REQ_MIRROR_FALLBACK_NAME`).
+        """
         self.conn.executemany(
-            "INSERT OR REPLACE INTO tracker_names (tracker_id, name) VALUES (?, ?)",
+            "INSERT INTO tracker_names (tracker_id, name) VALUES (?, ?) "
+            "ON CONFLICT(tracker_id) DO UPDATE SET name = excluded.name "
+            "WHERE name = 'tracker ' || tracker_id",
             list(names.items()),
         )
         self.conn.commit()
