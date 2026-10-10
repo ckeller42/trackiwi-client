@@ -49,8 +49,14 @@ _FIELDS: tuple[tuple[str, str, float | None, str], ...] = (
 
 
 def _escape_tag(value: str) -> str:
-    """Escape a tag key or value: comma, equals sign and space; newline → space."""
-    value = value.replace("\r", " ").replace("\n", " ")
+    """Escape a tag key or value: comma, equals sign and space; newline → space.
+
+    A backslash is neutralised to ``/`` rather than escaped: a trailing ``\\``
+    would otherwise escape the field-separator space, InfluxDB rejects the line
+    and the mirror never advances (#21). Same "neutralise, don't escape" choice
+    as ``\\r``/``\\n``, and it keeps the series key stable.
+    """
+    value = value.replace("\\", "/").replace("\r", " ").replace("\n", " ")
     return value.replace(",", "\\,").replace("=", "\\=").replace(" ", "\\ ")
 
 

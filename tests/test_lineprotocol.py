@@ -54,6 +54,14 @@ def test_newline_in_tag_value_becomes_space():
     assert "\n" not in line
 
 
+def test_backslash_in_tag_value_is_neutralised():
+    # A trailing backslash must not escape the field-separator space, or
+    # InfluxDB rejects the whole line and the mirror never advances (#21).
+    line = format_point(_row(), "Bus\\")
+    assert ",tracker_name=Bus/ " in line
+    assert "\\" not in line
+
+
 def test_an_empty_name_is_rejected():
     with pytest.raises(ValueError, match="tracker_name"):
         format_point(_row(), "")
