@@ -265,6 +265,26 @@ def test_check_v1_surfaces_a_results_error():
     assert not any("not found" in line for line in lines)
 
 
+# --- The InfluxDB opener ignores environment proxies (#26) ------------------
+
+
+def test_the_influx_opener_ignores_environment_proxies(monkeypatch):
+    """A token and the gzip'd history must never go to an env-injected proxy
+    in cleartext; the client-side opener still honours the proxy (#26)."""
+    import urllib.request
+
+    from trackiwi._http import no_redirect_opener
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:3128")
+
+    def effective_proxies(opener):
+        handlers = [h for h in opener.handlers if isinstance(h, urllib.request.ProxyHandler)]
+        return {scheme: url for h in handlers for scheme, url in getattr(h, "proxies", {}).items()}
+
+    assert effective_proxies(no_redirect_opener(proxy=False)) == {}
+    assert effective_proxies(no_redirect_opener()).get("http") == "http://proxy.invalid:3128"
+
+
 # --- Redirects are errors, never acknowledgements (final review C1) ---------
 
 

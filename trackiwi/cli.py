@@ -105,7 +105,18 @@ def cmd_login(args: argparse.Namespace) -> int:
     if bool(args.token) != bool(args.api_base):
         raise TrackiwiError("--token and --api-base must be given together")
     if args.token and args.api_base:
-        token = _read_token() if args.token == "-" else args.token
+        if args.token == "-":
+            token = _read_token()
+        else:
+            # A literal token is in argv (world-readable /proc/<pid>/cmdline on
+            # Linux) and the shell history; prefer `--token -` (#40).
+            print(
+                "warning: passing the token on the command line exposes it in "
+                "the process list and shell history; use '--token -' to read it "
+                "from stdin instead",
+                file=sys.stderr,
+            )
+            token = args.token
         client = Client(api_base=args.api_base, token=token)
         client.save()
         print("Session stored. Run 'trackiwi trackers' to verify it.")

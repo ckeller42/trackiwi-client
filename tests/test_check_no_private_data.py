@@ -128,6 +128,45 @@ def test_sqlite_header_is_blocked_regardless_of_name(tmp_path, monkeypatch):
     assert any("database" in p for p in check_paths([rel]))
 
 
+# --- A trackiwi export under any filename is caught, not only track suffixes (#27) ---
+# The GPX marker is built by concatenation so this test file does not itself
+# carry the contiguous fingerprint the guard hunts for.
+_GPX_MARKER = 'creator="' + "trackiwi-client/0.2.0"
+
+
+def test_a_csv_export_under_a_plain_txt_name_is_blocked(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, "positions.txt", "id,tracker_id,fix_at,latitude\n1,7,1700000000,31.0\n")
+    assert check_paths([rel]) != []
+
+
+def test_a_gpx_export_with_no_suffix_is_blocked(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, "track", f'<gpx {_GPX_MARKER}"><trk/></gpx>\n')
+    assert check_paths([rel]) != []
+
+
+def test_a_geojson_export_saved_as_jsonl_is_blocked(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, "track.jsonl", FEATURE_COLLECTION)
+    assert check_paths([rel]) != []
+
+
+def test_a_synthetic_csv_fixture_under_any_name_is_allowed(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    rel = _write(
+        tmp_path, "tests/fixtures/synthetic-sample.txt", "id,tracker_id,fix_at,x\n1,7,1,2\n"
+    )
+    assert check_paths([rel]) == []
+
+
+def test_source_with_the_export_field_names_is_not_flagged(tmp_path, monkeypatch):
+    """export.py and tests mention tracker_id/point_count; they are not exports."""
+    monkeypatch.chdir(tmp_path)
+    rel = _write(tmp_path, "trackiwi/export.py", 'd = {"tracker_id": 7, "point_count": 3}\n')
+    assert check_paths([rel]) == []
+
+
 def test_credential_file_is_blocked(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     rel = _write(tmp_path, "config.json", "{}\n")

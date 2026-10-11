@@ -295,6 +295,13 @@ def test_sync_does_not_create_cache_when_unauthenticated(capsys):
 # --- Fix 8: `--token -` keeps the token out of argv and shell history ---
 
 
+def test_login_with_a_literal_token_warns(capsys):
+    """A literal `--token <value>` is in argv and shell history; warn (#40)."""
+    assert main(["login", "--token", "abc", "--api-base", "https://api.example.invalid"]) == 0
+    err = capsys.readouterr().err
+    assert "process list" in err and "--token -" in err
+
+
 def test_login_reads_the_token_from_stdin(monkeypatch):
     """A token passed as `--token <value>` is written to the shell history file
     and is visible in `ps -ww` to every process running as the same user.

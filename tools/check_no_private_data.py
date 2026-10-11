@@ -36,6 +36,13 @@ WORKFLOW_DIR = ".github/workflows/"
 ACTION_PIN_RE = re.compile(r"^(\s*(?:-\s+)?uses:\s*[\w.-]+/[\w./-]+)@[0-9a-f]{40}(?=\s|$)")
 SELF = "tools/check_no_private_data.py"
 SQLITE_HEADER = b"SQLite format 3\x00"
+#: Fingerprints of `trackiwi export`'s own output, so an export committed under
+#: any name — `positions.txt`, `track` with no suffix, `.jsonl`, `.log` — is
+#: caught, not only the recognised track suffixes (#27). Exact strings the
+#: exporter writes (export.py), never coordinate heuristics.
+EXPORT_CSV_HEADER = b"id,tracker_id,fix_at,"
+EXPORT_GPX_MARKER = b'creator="trackiwi-client/'
+EXPORT_SNIFF_BYTES = 65536
 
 
 #: A GeoJSON document identifies itself exactly, by its own top-level `type`
@@ -80,11 +87,33 @@ def _is_geojson(path: str) -> bool:
     return isinstance(data, dict) and data.get("type") in GEOJSON_TYPES
 
 
+def _is_trackiwi_export(path: str) -> bool:
+    """True for a CSV or GPX `trackiwi export` under any filename (#27).
+
+    Sniffs the head for the exporter's own fingerprints — the CSV header or the
+    GPX ``creator`` attribute — so an export saved as ``.txt``/``.log``/no
+    suffix is caught too. These are the serialized output forms, not source
+    strings (`export.py` writes `f"trackiwi-client/{...}"`, never the XML
+    ``creator="trackiwi-client/``). GeoJSON is handled by `_is_geojson`, which
+    parses the file, so source never matches it. No coordinate heuristics.
+    """
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(EXPORT_SNIFF_BYTES)
+    except OSError:
+        return False
+    return head.startswith(EXPORT_CSV_HEADER) or EXPORT_GPX_MARKER in head
+
+
 def check_paths(paths: Iterable[str]) -> list[str]:
     """Return a human-readable violation per offending path; empty when clean."""
     problems: list[str] = []
     for raw in paths:
         path = raw.replace("\\", "/")
+        # This tool carries the export fingerprints it hunts for (the GPX
+        # marker, the CSV header) as literals, so skip it before any sniff.
+        if path == SELF:
+            continue
         name = Path(path).name
         suffix = Path(path).suffix.lower()
         parent = str(Path(path).parent).replace("\\", "/")
@@ -97,7 +126,11 @@ def check_paths(paths: Iterable[str]) -> list[str]:
                 f"{path}: database file (sqlite header detected) may never be committed"
             )
             continue
-        is_track = suffix in TRACK_SUFFIXES or (suffix == ".json" and _is_geojson(path))
+        is_track = (
+            suffix in TRACK_SUFFIXES
+            or _is_geojson(path)  # any filename: exact RFC type; source won't parse as JSON
+            or _is_trackiwi_export(path)
+        )
         if is_track and not (
             parent == ALLOWED_TRACK_DIR and name.startswith(ALLOWED_TRACK_BASENAME_PREFIX)
         ):
@@ -112,7 +145,7 @@ def check_paths(paths: Iterable[str]) -> list[str]:
         if ".trackiwi/" in path:
             problems.append(f"{path}: path is inside a .trackiwi/ data directory")
             continue
-        if path == SELF or suffix not in TEXT_SUFFIXES:
+        if suffix not in TEXT_SUFFIXES:
             continue
 
         try:

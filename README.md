@@ -277,7 +277,7 @@ trackiwi ingest         # sync + push; what the timer/container runs
    alone so it runs its first-time setup (org, bucket, operator token):
 
    ```bash
-   cp deploy/example.env deploy/.env
+   install -m 600 deploy/example.env deploy/.env   # owner-only: it holds every secret
    docker compose -f deploy/docker-compose.yml up -d influxdb
    ```
 

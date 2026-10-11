@@ -128,6 +128,8 @@ repository's own files is marked **verify in repo settings**.
   call.** Two reasons, both learned the hard way: the `ruff-format` hook is
   scoped to Python on purpose, and a bare `ruff format` also rewrites Python
   code fences inside `docs/` (it silently restructured a fenced snippet in the
-  plan document once, changing its meaning); and `pre-commit` in CI is the
-  third enforcement layer for the no-private-data guard, which a local
-  `git commit --no-verify` can bypass.
+  plan document once, changing its meaning); and `pre-commit` in CI re-runs the
+  no-private-data guard, so a local `git commit --no-verify` that skipped it is
+  *detected* after the push — at which point the data is already in the remote's
+  history and the fix is a history rewrite, not a blocked commit. CI catches the
+  bypass; it does not prevent it.
