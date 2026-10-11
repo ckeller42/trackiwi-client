@@ -14,7 +14,7 @@ import os
 import stat
 import sys
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -356,6 +356,30 @@ def cmd_influx_push(_: argparse.Namespace) -> int:
     return 0
 
 
+def _tracker_names(records: Iterable[Any]) -> dict[int, str]:
+    """Map tracker id → name from a `trackers()` response, defensively.
+
+    The API is undocumented: a record that is not a dict, or whose ``id`` is
+    not an int or a digit string, is skipped rather than crashing `ingest`
+    and skipping the push (#19). A missing or non-string name becomes ``""``
+    so the ``tracker <id>`` fallback applies.
+    """
+    names: dict[int, str] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        ident = record.get("id")
+        if isinstance(ident, bool) or not isinstance(ident, (int, str)):
+            continue
+        try:
+            tid = int(ident)
+        except ValueError:
+            continue
+        name = record.get("name")
+        names[tid] = name if isinstance(name, str) else ""
+    return names
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     """Sync from trackiwi, refresh tracker names, then push to InfluxDB.
 
@@ -375,8 +399,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     # are assigned only after `trackers()` answered.
     if client is not None and not isinstance(trackiwi_error, AuthError):
         try:
-            trackers = client.trackers()
-            names = {int(t["id"]): str(t.get("name") or "") for t in trackers if "id" in t}
+            names = _tracker_names(client.trackers())
             with Store() as store:
                 store.set_tracker_names({k: v for k, v in names.items() if v})
                 store.name_unnamed_trackers()
