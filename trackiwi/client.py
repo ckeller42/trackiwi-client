@@ -325,16 +325,21 @@ class Client:
         Directory and file are created *at* their final mode, never widened and
         then narrowed, so no other process can hold an open fd on a wider file.
         """
-        self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.config_path.parent, 0o700)
         payload = {"api_base": self.api_base, "token": self.token, "user_id": self.user_id}
         text = json.dumps(payload, indent=2) + "\n"
-        fd = os.open(self.config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        # O_CREAT's mode applies to a new file only, so an existing config
-        # file (or one created under a narrower umask) still gets chmod'ed.
-        os.chmod(self.config_path, 0o600)
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(self.config_path.parent, 0o700)
+            fd = os.open(self.config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            # O_CREAT's mode applies to a new file only, so an existing config
+            # file (or one created under a narrower umask) still gets chmod'ed.
+            os.chmod(self.config_path, 0o600)
+        except OSError as error:
+            # A read-only mount or a permission error otherwise escaped main()
+            # as a raw traceback on login (#20).
+            raise TrackiwiError(f"cannot save session ({self.config_path}): {error}") from error
 
     def _request(
         self,

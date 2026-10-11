@@ -9,13 +9,45 @@ inside an owner-only directory.
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 from . import COLUMNS, TrackiwiError
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _converts_sqlite_errors(
+    method: Callable[Concatenate[Store, _P], _R],
+) -> Callable[Concatenate[Store, _P], _R]:
+    """Turn a `sqlite3.Error` from a Store method into a `TrackiwiError`.
+
+    Only `__enter__` converted before; a lock or I/O error during any later
+    operation — an overlapping ingest, corruption found on a read, a commit —
+    escaped `main()` as a traceback (#20). `_open_failure` still distinguishes
+    a lock (wait and re-run) from corruption (purge).
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: Store, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        try:
+            return method(self, *args, **kwargs)
+        except (sqlite3.IntegrityError, sqlite3.ProgrammingError):
+            # A bad row or a misused query is a caller/bug error, not a locked
+            # or corrupt cache — let it surface as itself, not "run purge".
+            raise
+        except sqlite3.Error as error:
+            raise self._open_failure(error) from error
+
+    # functools.wraps + Concatenate confuses mypy's return inference; the
+    # wrapper has the declared signature.
+    return cast("Callable[Concatenate[Store, _P], _R]", wrapper)
+
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS positions (
@@ -81,17 +113,20 @@ class Store:
         locked cache is reported as transient, never as corruption to purge),
         the latter via :meth:`_open_failure`.
         """
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.path.parent, 0o700)
         # Create at 0600 before sqlite3 can create it at the umask default (no
         # chmod window). O_CREAT's mode applies to new files only; the chmod
-        # below heals an existing one.
+        # below heals an existing one. mkdir/chmod are inside the guard too: a
+        # read-only mount (a container) otherwise raised a raw OSError (#20).
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            os.chmod(self.path.parent, 0o700)
             os.close(os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600))
             os.chmod(self.path, 0o600)
         except OSError as error:
             raise TrackiwiError(f"cannot open local cache ({self.path}): {error}") from error
-        conn = sqlite3.connect(self.path)
+        # timeout=30 so a timer-driven ingest waits out a manual sync's write
+        # lock instead of failing at the 5 s default (#20).
+        conn = sqlite3.connect(self.path, timeout=30)
         try:
             conn.row_factory = sqlite3.Row
             conn.executescript(_SCHEMA)
@@ -123,10 +158,19 @@ class Store:
 
     def __exit__(self, exc_type: type[BaseException] | None, *exc: object) -> None:
         if self._conn is not None:
-            if exc_type is None:
-                self._conn.commit()
-            else:
-                self._conn.rollback()
+            try:
+                if exc_type is None:
+                    self._conn.commit()
+                else:
+                    self._conn.rollback()
+            except sqlite3.Error as error:
+                self._conn.close()
+                self._conn = None
+                # Only convert a clean-exit commit failure; a rollback failing
+                # while already unwinding must not mask the original error.
+                if exc_type is None:
+                    raise self._open_failure(error) from error
+                return
             self._conn.close()
             self._conn = None
 
@@ -137,6 +181,7 @@ class Store:
             raise RuntimeError("Store must be used as a context manager")
         return self._conn
 
+    @_converts_sqlite_errors
     def upsert(self, rows: Iterable[tuple[Any, ...]]) -> int:
         """Insert or replace `rows`, returning how many were *newly inserted*.
 
@@ -151,16 +196,19 @@ class Store:
         self.conn.commit()
         return self.count() - before
 
+    @_converts_sqlite_errors
     def max_id(self) -> int | None:
         """Return the highest stored position id, or ``None`` when empty."""
         highest: int | None = self.conn.execute("SELECT MAX(id) FROM positions").fetchone()[0]
         return highest
 
+    @_converts_sqlite_errors
     def count(self) -> int:
         """Return the number of cached positions."""
         total: int = self.conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0]
         return total
 
+    @_converts_sqlite_errors
     def query(
         self,
         tracker_id: int | None = None,
@@ -183,6 +231,7 @@ class Store:
         sql = f"SELECT * FROM positions{where} ORDER BY fix_at, id"
         return list(self.conn.execute(sql, params))
 
+    @_converts_sqlite_errors
     def mirror_position(self, target: str) -> int:
         """Return the highest id already mirrored to `target`, or 0 if none.
 
@@ -194,6 +243,7 @@ class Store:
         last: int = row[0] if row is not None else 0
         return last
 
+    @_converts_sqlite_errors
     def set_mirror_position(self, target: str, last_id: int) -> None:
         """Record that every row up to `last_id` reached `target`, and commit.
 
@@ -205,6 +255,7 @@ class Store:
         )
         self.conn.commit()
 
+    @_converts_sqlite_errors
     def rows_after(self, last_id: int, limit: int) -> list[sqlite3.Row]:
         """Return up to `limit` rows with ``id > last_id``, ordered by id."""
         return list(
@@ -214,6 +265,7 @@ class Store:
             )
         )
 
+    @_converts_sqlite_errors
     def set_tracker_names(self, names: Mapping[int, str]) -> None:
         """Pin each tracker's first real name; upgrade a fallback to a real one.
 
@@ -233,6 +285,7 @@ class Store:
         )
         self.conn.commit()
 
+    @_converts_sqlite_errors
     def name_unnamed_trackers(self) -> None:
         """Give every cached tracker that has no stored name ``tracker <id>``.
 
@@ -245,6 +298,7 @@ class Store:
         )
         self.conn.commit()
 
+    @_converts_sqlite_errors
     def tracker_names(self) -> dict[int, str]:
         """Return every stored tracker id → display name."""
         return {
