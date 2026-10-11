@@ -114,6 +114,9 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   ``Implements :need:`REQ_…`.``; `docs/traceability.rst` needs a `.. test::`
   that `:verifies:` it with real test node ids. New code adds both or the docs
   build fails. Build: `.venv/bin/sphinx-build -b html -W docs docs/_build/html`.
+  `tests/test_traceability.py` additionally checks each cited node id resolves
+  to a real `def` and that no source docstring names a `REQ_` that does not
+  exist — so a renamed or deleted test fails `pytest`, not just the docs build.
 - **Doctests only on pure functions** (`export.*`, `heading.*`, `normalize_epoch`,
   `epoch_from_iso`, `parse_positions`), synthetic values only.
 - **Gates:** `interrogate` fail-under 100 on the public surface (shorten a

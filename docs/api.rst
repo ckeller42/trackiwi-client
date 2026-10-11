@@ -51,3 +51,18 @@ fails the build under ``-W``, which catches a typo'd requirement ID.
    :members:
    :undoc-members:
    :private-members: _write_atomically, _heading_line
+
+``trackiwi.influx``
+-------------------
+
+.. automodule:: trackiwi.influx
+   :members:
+   :undoc-members:
+   :private-members: _read_file
+
+``trackiwi.lineprotocol``
+-------------------------
+
+.. automodule:: trackiwi.lineprotocol
+   :members:
+   :undoc-members:
