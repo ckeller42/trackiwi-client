@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -205,6 +206,41 @@ def test_corrupt_database_message_keeps_purge_and_names_the_sqlite_detail(tmp_pa
     message = str(excinfo.value)
     assert "purge" in message
     assert "not a database" in message
+
+
+# --- A lock or filesystem error AFTER open is also converted (#20) ----------
+
+
+def test_a_lock_during_a_write_is_reported_not_a_traceback(tmp_path, impatient_sqlite):
+    """An overlapping `trackiwi` can lock the cache after `__enter__` passed;
+    the write must become the 'in use' error, not a raw OperationalError."""
+    from trackiwi import TrackiwiError
+
+    path = tmp_path / "positions.db"
+    with Store(path) as store:
+        holder = sqlite3.connect(path)
+        holder.execute("BEGIN EXCLUSIVE")
+        try:
+            with pytest.raises(TrackiwiError) as excinfo:
+                store.upsert([row(1)])
+        finally:
+            holder.rollback()
+            holder.close()
+    message = str(excinfo.value)
+    assert "locked" in message or "busy" in message
+    assert "purge" not in message
+
+
+def test_a_filesystem_error_opening_the_cache_is_converted(tmp_path, monkeypatch):
+    """mkdir on a read-only mount used to raise a raw PermissionError (#20)."""
+    from trackiwi import TrackiwiError
+
+    def boom(*args, **kwargs):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(Path, "mkdir", boom)
+    with pytest.raises(TrackiwiError, match="cache"), Store(tmp_path / "sub" / "positions.db"):
+        pass  # pragma: no cover - __enter__ raises
 
 
 # --- The library-level purge must make the same promise as the CLI (N-5) ---

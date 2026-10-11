@@ -51,6 +51,17 @@ def test_login_saves_config_owner_only():
     assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
 
 
+def test_save_converts_a_filesystem_error(monkeypatch):
+    """A read-only mount must not crash login with a raw OSError (#20)."""
+
+    def boom(*args, **kwargs):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(os, "open", boom)
+    with pytest.raises(TrackiwiError, match="cannot save session"):
+        Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
+
+
 def test_load_restores_a_saved_session():
     Client(opener=FakeOpener(login_response())).login("a@example.invalid", "pw")
     restored = Client.load()
