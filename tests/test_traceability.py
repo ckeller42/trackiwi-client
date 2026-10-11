@@ -33,8 +33,9 @@ def _verifies() -> dict[str, list[str]]:
 
 
 def test_every_requirement_has_a_verifying_test():
-    missing = _requirement_ids() - set(_verifies())
-    assert not missing, f"requirements with no verifying test: {sorted(missing)}"
+    verified = {req for req, node_ids in _verifies().items() if node_ids}
+    missing = _requirement_ids() - verified
+    assert not missing, f"requirements with no verifying test node id: {sorted(missing)}"
 
 
 def test_every_verifies_target_is_a_real_requirement():
@@ -48,12 +49,16 @@ def test_every_cited_test_node_id_resolves_to_a_real_test():
         for node_id in node_ids:
             rel, name = node_id.split("::")
             path = ROOT / rel
-            found = path.exists() and re.search(
-                rf"^\s*def {re.escape(name)}\(", path.read_text(), re.M
+            # A module-level ``def test_...`` (column 0, so not a nested helper
+            # or a method) that pytest collects as a test.
+            found = (
+                name.startswith("test_")
+                and path.exists()
+                and re.search(rf"^def {re.escape(name)}\(", path.read_text(), re.M)
             )
             if not found:
                 missing.append(node_id)
-    assert not missing, f"traceability cites tests that do not exist: {sorted(set(missing))}"
+    assert not missing, f"traceability cites tests pytest would not collect: {sorted(set(missing))}"
 
 
 def test_every_requirement_a_source_docstring_claims_exists():
