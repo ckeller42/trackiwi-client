@@ -52,8 +52,9 @@ class Heading:
     ``degrees`` is clockwise from true north in ``[0, 360)``, or ``None`` when
     nothing supports an estimate. ``state`` is the confidence flag:
 
-    - ``moving``: the last fix has ``speed > 0``; the heading is that fix's
-      ``course`` (GPS course-over-ground, reliable while moving).
+    - ``moving``: the last fix is at or above ``min_speed`` (a slower fix is
+      GPS jitter at a standstill); the heading is that fix's ``course`` (GPS
+      course-over-ground, reliable while moving).
     - ``freshly_parked``: the last fix is stationary and the last movement was
       no more than ``stale_after`` seconds ago; the heading is the direction
       of approach as the vehicle came to rest.
@@ -68,8 +69,8 @@ class Heading:
     parked, because raw ``course`` is noisy at low speed), ``course`` is the
     raw field, ``none`` goes with ``degrees is None``.
 
-    ``moved_at`` is the ``fix_at`` (epoch seconds) of the last fix with
-    ``speed > 0``; ``parked_for`` is how many seconds ago that was, and is
+    ``moved_at`` is the ``fix_at`` (epoch seconds) of the last fix at or above
+    ``min_speed``; ``parked_for`` is how many seconds ago that was, and is
     ``None`` while moving or unknown.
     """
 

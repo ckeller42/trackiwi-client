@@ -62,6 +62,7 @@ the cache.
 ```bash
 trackiwi heading
 trackiwi heading --tracker 7 --stale-after 900
+trackiwi heading --min-speed 5
 ```
 
 `heading` reads the local cache only (run `sync` first) and prints one line per tracker:

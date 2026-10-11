@@ -133,7 +133,8 @@ and says how much to trust it, printing tab-separated: tracker id, degrees
 clockwise from true north, state, source, when it last moved (UTC) and for how
 many seconds it has been parked.
 
-- **`moving`**: the latest fix has `speed > 0`; the heading is its `course`.
+- **`moving`**: the latest fix is at or above `--min-speed` (default 2 km/h; a
+  slower fix is GPS jitter at a standstill); the heading is its `course`.
 - **`freshly_parked`**: stationary, and the last movement was within
   `--stale-after` seconds (default 3600). The heading is the direction of
   approach — the great-circle bearing between the last two moving fixes
