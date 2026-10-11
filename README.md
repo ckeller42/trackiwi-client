@@ -471,11 +471,12 @@ detect-secrets, markdownlint-cli2, actionlint) and CI runs exactly that, so
 local and CI results agree.
 
 No private data may enter this repository. A pre-commit hook blocks databases,
-track exports outside `tests/fixtures/synthetic-*`, credential files
-(`config.json`, `.env*`, `influx.toml`, `*.token`, `*.password` and their
+track exports outside `tests/fixtures/synthetic-*` (by suffix, SQLite header,
+GeoJSON type, and the exporter's own fingerprints under any name) and credential
+files (`config.json`, `.env*`, `influx.toml`, `*.token`, `*.password` and their
 bare-dotfile forms — the committed templates are `influx.example.toml` and
-`example.env`) and token-shaped strings; `.gitignore` and CI enforce the same
-rules independently.
+`example.env`). detect-secrets and gitleaks block token-shaped strings; `.gitignore`
+and CI enforce the same rules independently.
 Test fixtures are synthetic: invented coordinates, invented IDs.
 
 ### Requirements & traceability
