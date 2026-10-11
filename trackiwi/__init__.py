@@ -10,7 +10,7 @@ objects under ``docs/``; see ``docs/requirements.rst``.
 
 from typing import Any, Protocol
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 
 class TrackiwiError(Exception):
