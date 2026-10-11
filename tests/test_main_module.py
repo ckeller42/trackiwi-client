@@ -26,8 +26,10 @@ def test_a_dead_pipe_on_export_does_not_exit_120(tmp_path):
     subprocess.run([sys.executable, "-c", seed], env=env, check=True)
     cmd = f"set -o pipefail; {sys.executable} -m trackiwi export --format csv | true"
     result = subprocess.run(["bash", "-c", cmd], env=env, capture_output=True, text=True)
-    assert result.returncode != 120
-    assert "Exception ignored" not in result.stderr
+    # export treats a dead pipe as success: the writer exits 0 (pipefail would
+    # surface a 120 or any non-zero), and nothing is printed to stderr.
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
 
 
 def _run(args):
