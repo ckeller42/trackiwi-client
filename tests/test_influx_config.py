@@ -66,6 +66,13 @@ def test_missing_url_names_the_key_and_file(tmp_path):
         load_config(tmp_path / "missing.toml", env={})
 
 
+def test_a_url_without_a_scheme_is_rejected(tmp_path):
+    # Without this, Request() raises a raw ValueError outside the try (#19).
+    for bad in ("influx.local", "influx.local:8086", "ftp://h", "://h"):
+        with pytest.raises(TrackiwiError, match="http"):
+            load_config(tmp_path / "missing.toml", env={"TRACKIWI_INFLUX_URL": bad})
+
+
 def test_unknown_key_is_rejected(tmp_path):
     path = _write(tmp_path / "influx.toml", 'url = "http://h"\ntoken = "plaintext"\n')
     with pytest.raises(TrackiwiError, match="unknown key 'token'"):

@@ -180,6 +180,22 @@ def test_ingest_whose_name_refresh_fails_pushes_no_id_tags(env, monkeypatch, cap
     assert FakeWriter.instances[0].batches == []
 
 
+def test_ingest_survives_a_malformed_trackers_response(env, monkeypatch):
+    """A record that is not a dict, or whose id is null/non-numeric, must be
+    skipped — not crash `ingest` and skip the push (#19)."""
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(
+            batches=[([_row(1)], 0, 1)],
+            trackers=[{"id": None}, "garbage", {"name": "x"}, {"id": "7", "name": "Bus"}],
+        ),
+    )
+    assert cli.main(["ingest"]) == 0
+    lines = FakeWriter.instances[0].batches[0]
+    assert len(lines) == 1
+    assert ",tracker_name=Bus " in lines[0]
+
+
 # --- A tracker without a name must not stall the mirror (issue #16) ---------
 
 

@@ -234,6 +234,37 @@ def test_check_v1_database_present():
     assert any("database 'trackiwi' found" in line for line in lines)
 
 
+# --- check() tolerates an unexpected 200 body instead of crashing (#19) -----
+
+
+def test_check_v2_non_json_body_is_reported_not_fatal():
+    # A proxy/SSO page answering 200 with HTML must not raise JSONDecodeError.
+    opener = FakeOpener(FakeResponse(b"<html>login</html>", status=200))
+    ok, lines = InfluxWriter(_cfg(), opener=opener).check()
+    assert not ok
+    assert any("unexpected" in line for line in lines)
+
+
+def test_check_v2_json_list_body_is_reported_not_fatal():
+    # A JSON list (not an object) must not raise AttributeError on .get().
+    opener = FakeOpener(FakeResponse(b"[]", status=200))
+    ok, lines = InfluxWriter(_cfg(), opener=opener).check()
+    assert not ok
+    assert any("unexpected" in line for line in lines)
+
+
+def test_check_v1_surfaces_a_results_error():
+    # A 200 body carrying results[0].error was misreported as "not found".
+    body = json.dumps({"results": [{"error": "not authorized"}]}).encode()
+    opener = FakeOpener(FakeResponse(body, status=200))
+    ok, lines = InfluxWriter(
+        _cfg(version=1, database="trackiwi", token=None), opener=opener
+    ).check()
+    assert not ok
+    assert any("not authorized" in line for line in lines)
+    assert not any("not found" in line for line in lines)
+
+
 # --- Redirects are errors, never acknowledgements (final review C1) ---------
 
 

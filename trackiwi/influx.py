@@ -126,6 +126,11 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
         raise TrackiwiError(
             f"InfluxDB 'url' is not configured: set it in {path} or TRACKIWI_INFLUX_URL"
         )
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        # Without this, a scheme-less value reaches Request() as a raw
+        # ValueError outside the request's try (#19).
+        raise TrackiwiError(f"InfluxDB 'url' must be an http(s) URL with a host, got {url!r}")
     token_env = str(merged.get("token_env") or DEFAULT_TOKEN_ENV)
     token = env.get(token_env) or None
     if token is None and merged.get("token_file"):
@@ -153,6 +158,19 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
 WRITE_TIMEOUT = 60
 _RETENTION_DROP = b"beyond retention policy"
+
+
+def _as_object(body: bytes) -> dict[str, Any] | None:
+    """Parse a response body as a JSON object, or None if it is neither.
+
+    `check()` uses this to report an unexpected 200 body (a captive portal's
+    HTML, a JSON list) rather than crash on it (#19).
+    """
+    try:
+        data = json.loads(body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class InfluxWriter:
@@ -331,8 +349,11 @@ class InfluxWriter:
             if status != 200:
                 detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
                 return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
-            found = json.loads(body or b"{}").get("buckets") or []
-            if any(b.get("name") == self.config.bucket for b in found):
+            obj = _as_object(body)
+            if obj is None:
+                return False, [*lines, "bucket lookup returned an unexpected response"]
+            found = obj.get("buckets") or []
+            if any(isinstance(b, dict) and b.get("name") == self.config.bucket for b in found):
                 return True, [*lines, f"bucket '{self.config.bucket}' found"]
             return False, [*lines, f"bucket '{self.config.bucket}' not found"]
         status, _, body = self._request(
@@ -343,8 +364,17 @@ class InfluxWriter:
         if status != 200:
             detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
             return False, [*lines, f"database lookup failed (HTTP {status}): {detail}"]
-        series = (json.loads(body).get("results") or [{}])[0].get("series") or [{}]
-        names = {row[0] for row in series[0].get("values") or []}
+        obj = _as_object(body)
+        if obj is None:
+            return False, [*lines, "database lookup returned an unexpected response"]
+        results = obj.get("results") or [{}]
+        first = results[0] if results and isinstance(results[0], dict) else {}
+        if first.get("error"):
+            # A 200 body can still carry a per-statement error (e.g. auth).
+            return False, [*lines, f"database lookup rejected: {first['error']}"]
+        series = first.get("series") or [{}]
+        first_series = series[0] if series and isinstance(series[0], dict) else {}
+        names = {row[0] for row in first_series.get("values") or [] if row}
         if self.config.database in names:
             return True, [*lines, f"database '{self.config.database}' found"]
         return False, [*lines, f"database '{self.config.database}' not found"]
