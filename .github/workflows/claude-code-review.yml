@@ -74,12 +74,12 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
-      # A denied tool call can end the review with nothing posted while the
-      # action still reports success (#8). The sanitised log prints only a
-      # count; the execution file keeps each denial's tool name and input, so
-      # read it from there, print them and fail the job. Also fail when Claude
-      # never ran or its result is not a success, for the same reason.
-      - name: Fail on permission denials
+      # The action reports success even when Claude posted nothing (#8), so
+      # fail unless the run posted a review (a `gh pr comment` or an inline
+      # comment). Denied tool calls alone do not fail it: Claude sometimes tries
+      # a piped or `git fetch` command the allowlist blocks on purpose and then
+      # reviews anyway (#81, #82, #86), so denials are listed as a warning.
+      - name: Fail unless a review was posted
         if: ${{ !cancelled() }}
         env:
           EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
@@ -97,12 +97,19 @@ jobs:
           fi
           count=$(jq -r '.permission_denials // [] | length' <<<"$result")
           if [ "$count" -gt 0 ]; then
-            echo "::error::$count tool call(s) were denied; the review is incomplete. Denied calls:"
+            echo "::warning::$count tool call(s) were denied:"
             jq -r '.permission_denials[] | "  \(.tool_name): \(.tool_input | tojson | .[0:300])"' <<<"$result"
-            exit 1
           fi
           if [ "$(jq -r '.subtype' <<<"$result")" != "success" ] || [ "$(jq -r '.is_error' <<<"$result")" = "true" ]; then
             echo "::error::Claude ended with result subtype '$(jq -r '.subtype' <<<"$result")' (is_error=$(jq -r '.is_error' <<<"$result")); the review did not finish."
             exit 1
           fi
-          echo "permission denials: 0, result: success"
+          posted=$(jq '[.[] | select(.type == "assistant") | .message.content[]?
+            | select(.type == "tool_use")
+            | select(.name == "mcp__github_inline_comment__create_inline_comment"
+                or (.name == "Bash" and (.input.command // "" | test("^gh pr comment"))))] | length' "$EXECUTION_FILE")
+          if [ "$posted" -eq 0 ]; then
+            echo "::error::Claude finished without posting a review ($count denied call(s) above)."
+            exit 1
+          fi
+          echo "review posted ($posted comment call(s)), denials: $count"
