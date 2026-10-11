@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Local gate. Mirrors CI exactly — if this passes, CI passes.
+# Local gate: the same checks CI runs (pre-commit, mypy, pytest + coverage,
+# doctests, sphinx -W, interrogate), on this venv's one Python. CI also runs
+# the test suite on 3.11/3.12/3.13 — a version-specific failure can still show
+# up there, not here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 .venv/bin/pre-commit run --all-files

@@ -161,6 +161,17 @@ def test_check_v2_rejected_token():
     assert any("rejected" in line for line in lines)
 
 
+def test_check_v2_other_status_redacts_the_body(capsys):
+    """The bucket-lookup failure branch runs redact on server text (#42): a
+    token echoed in a 5xx body must not reach the report."""
+    body = b"server error: Authorization: Token tok-secret in the request"
+    opener = FakeOpener(FakeResponse(body, status=500))
+    ok, lines = InfluxWriter(_cfg(), opener=opener).check()
+    assert not ok
+    assert any("bucket lookup failed (HTTP 500)" in line for line in lines)
+    assert not any("tok-secret" in line for line in lines)
+
+
 # --- check() tolerates an unexpected 200 body instead of crashing (#19) -----
 
 
