@@ -22,11 +22,10 @@ def test_default_path_honours_xdg(monkeypatch, tmp_path):
 def test_file_values_load(tmp_path):
     path = _write(
         tmp_path / "influx.toml",
-        'url = "http://localhost:8086"\nversion = 2\norg = "home"\nbucket = "trackiwi"\n',
+        'url = "http://localhost:8086"\norg = "home"\nbucket = "trackiwi"\n',
     )
     cfg = load_config(path, env={"TRACKIWI_INFLUX_TOKEN": "tok"})
     assert cfg.url == "http://localhost:8086"
-    assert cfg.version == 2
     assert (cfg.org, cfg.bucket, cfg.token) == ("home", "trackiwi", "tok")
 
 
@@ -42,23 +41,11 @@ def test_environment_overrides_file(tmp_path):
 def test_environment_alone_is_enough(tmp_path):
     cfg = load_config(tmp_path / "missing.toml", env={"TRACKIWI_INFLUX_URL": "http://h:8086"})
     assert cfg.url == "http://h:8086"
-    assert cfg.version is None
 
 
 def test_trailing_slash_is_removed_from_url(tmp_path):
     cfg = load_config(tmp_path / "missing.toml", env={"TRACKIWI_INFLUX_URL": "http://h:8086/"})
     assert cfg.url == "http://h:8086"
-
-
-def test_version_values(tmp_path):
-    for raw, expected in (("auto", None), ("1", 1), ("2", 2)):
-        env = {"TRACKIWI_INFLUX_URL": "http://h", "TRACKIWI_INFLUX_VERSION": raw}
-        assert load_config(tmp_path / "missing.toml", env=env).version == expected
-    with pytest.raises(TrackiwiError, match="version"):
-        load_config(
-            tmp_path / "missing.toml",
-            env={"TRACKIWI_INFLUX_URL": "http://h", "TRACKIWI_INFLUX_VERSION": "3"},
-        )
 
 
 def test_missing_url_names_the_key_and_file(tmp_path):
@@ -103,42 +90,11 @@ def test_token_env_names_the_variable_holding_the_token(tmp_path):
     assert cfg.token_env == "INFLUXDB_TOKEN"
 
 
-def test_token_file_is_read_and_trailing_newline_stripped(tmp_path):
-    token_file = _write(tmp_path / "influx.token", "tok-from-file\n")
-    path = _write(tmp_path / "influx.toml", f'url = "http://h"\ntoken_file = "{token_file}"\n')
-    assert load_config(path, env={}).token == "tok-from-file"
-
-
-def test_token_file_is_self_healed_to_0600(tmp_path):
-    # A token_file (or a .env from the template) is otherwise left world-readable (#40).
-    token_file = _write(tmp_path / "influx.token", "tok-from-file\n")
-    os.chmod(token_file, 0o644)
-    path = _write(tmp_path / "influx.toml", f'url = "http://h"\ntoken_file = "{token_file}"\n')
-    load_config(path, env={})
-    assert stat.S_IMODE(os.stat(token_file).st_mode) == 0o600
-
-
-def test_token_env_wins_over_token_file(tmp_path):
-    token_file = _write(tmp_path / "influx.token", "from-file")
-    path = _write(tmp_path / "influx.toml", f'url = "http://h"\ntoken_file = "{token_file}"\n')
-    assert load_config(path, env={"TRACKIWI_INFLUX_TOKEN": "from-env"}).token == "from-env"
-
-
-def test_missing_token_file_names_the_file(tmp_path):
-    path = _write(
-        tmp_path / "influx.toml", 'url = "http://h"\ntoken_file = "/nonexistent/influx.token"\n'
-    )
-    with pytest.raises(TrackiwiError, match="/nonexistent/influx.token"):
+def test_a_token_in_the_toml_file_is_rejected(tmp_path):
+    # The token belongs in an environment variable, never the committed-ish file.
+    path = _write(tmp_path / "influx.toml", 'url = "http://h"\ntoken_file = "x"\n')
+    with pytest.raises(TrackiwiError, match="unknown key 'token_file'"):
         load_config(path, env={})
-
-
-def test_password_file_is_read(tmp_path):
-    pw = _write(tmp_path / "influx.password", "s3cret\n")
-    path = _write(
-        tmp_path / "influx.toml",
-        f'url = "http://h"\nversion = 1\ndatabase = "d"\npassword_file = "{pw}"\n',
-    )
-    assert load_config(path, env={}).password == "s3cret"  # pragma: allowlist secret
 
 
 def test_load_narrows_a_widened_config_file(tmp_path):

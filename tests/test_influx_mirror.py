@@ -173,13 +173,9 @@ def test_a_batch_beyond_retention_advances_the_position(tmp_path, capsys):
     writer = InfluxWriter(
         InfluxConfig(
             url="http://influx.example.invalid:8086",
-            version=2,
             org="home",
             bucket="trackiwi",
-            database=None,
-            username=None,
             token="tok",
-            password=None,
             token_env="TRACKIWI_INFLUX_TOKEN",
         ),
         opener=opener,

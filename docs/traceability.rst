@@ -229,7 +229,6 @@ Verifying tests
    ``tests/test_influx_mirror.py::test_a_batch_beyond_retention_advances_the_position``,
    ``tests/test_influx_writer.py::test_a_redirect_on_write_is_an_error_not_an_ack``,
    ``tests/test_influx_writer.py::test_a_raised_redirect_http_error_is_an_error``,
-   ``tests/test_influx_writer.py::test_a_redirect_on_ping_is_an_error``,
    ``tests/test_influx_writer.py::test_a_redirect_on_check_is_an_error``,
    ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects``,
    ``tests/test_influx_writer.py::test_each_writer_gets_its_own_director``,
@@ -249,14 +248,14 @@ Verifying tests
    :id: TEST_INFLUX_WRITE_SCOPE
    :verifies: REQ_INFLUX_WRITE_SCOPE
 
-   ``tests/test_influx_writer.py::test_only_write_endpoints_receive_posts``,
+   ``tests/test_influx_writer.py::test_only_the_v2_write_endpoint_receives_posts``,
    ``tests/test_influx_writer.py::test_v2_write_request_is_exact``
 
 .. test:: InfluxDB credentials are redacted from errors
    :id: TEST_INFLUX_TOKEN_REDACT
    :verifies: REQ_INFLUX_TOKEN_REDACT
 
-   ``tests/test_influx_writer.py::test_token_and_password_are_redacted_from_error_bodies``,
+   ``tests/test_influx_writer.py::test_the_token_is_redacted_from_error_bodies``,
    ``tests/test_influx_writer.py::test_a_redirect_on_write_is_an_error_not_an_ack`` (the
    redirect target is redacted),
    ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects`` (the token

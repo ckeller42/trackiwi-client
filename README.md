@@ -268,7 +268,7 @@ and the next run catches up. Re-sending is harmless (same point, same
 timestamp), and the first run is the full backfill.
 
 ```bash
-trackiwi influx check   # connectivity, version, auth — read-only
+trackiwi influx check   # connectivity, auth, bucket — read-only
 trackiwi influx push    # send cached positions not yet mirrored
 trackiwi ingest         # sync + push; what the timer/container runs
 ```
@@ -379,14 +379,12 @@ the InfluxDB tokens.
 3. Give the timer the token. A systemd user unit does **not** see variables
    exported in your shell rc, so put the token in
    `~/.config/trackiwi/influx.env` (mode 0600), which the unit reads if it
-   exists — or name a file with `token_file` in `influx.toml`. Never put the
-   token in `influx.toml` itself.
+   exists. Never put the token in `influx.toml` itself.
 
    ```bash
    # ~/.config/trackiwi/influx.env — one VAR=value per line, no `export`
    TRACKIWI_INFLUX_TOKEN=changeme-influx-token
-   # the variable token_env names, if you changed it; for 1.x:
-   # TRACKIWI_INFLUX_PASSWORD=changeme-influx-password
+   # or the variable token_env names, if you changed it
    ```
 
 4. Run `trackiwi ingest` once by hand while trackiwi is reachable: `influx push`
@@ -401,9 +399,8 @@ gate that answers with a 3xx, `push` stops with an error naming the redirect
 target, and you set `url` to the final address. Points older than the bucket's
 retention are dropped by InfluxDB; `push` prints a warning and moves on.
 
-The dashboard is **Flux**, so it requires InfluxDB 2.x or InfluxDB Cloud, and
-Grafana 10 or later. The ingest itself also writes to InfluxDB 1.x (`version = 1`,
-`database = …`), but 1.x users need their own dashboard.
+The ingest writes to **InfluxDB 2.x or InfluxDB Cloud** only; the dashboard is
+**Flux** and needs Grafana 10 or later.
 
 The two map panels use the **OpenStreetMap** basemap (`osm-standard`), which needs no API
 key. Grafana's default basemap (CARTO) now shows "API KEY REQUIRED" tiles instead of a map.
