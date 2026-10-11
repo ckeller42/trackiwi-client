@@ -92,7 +92,7 @@ def test_check_exits_one_when_not_ok(env, monkeypatch):
 
 def test_push_without_cache_is_a_noop(env, capsys):
     assert cli.main(["influx", "push"]) == 0
-    assert "nothing cached" in capsys.readouterr().out
+    assert "nothing cached" in capsys.readouterr().err  # stderr, not stdout (#36)
     assert not (env / "data" / "trackiwi" / "positions.db").exists()
 
 

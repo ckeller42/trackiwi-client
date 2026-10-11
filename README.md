@@ -231,7 +231,9 @@ file, the token is read from it.
 ### Exit codes
 
 - `0` — success
-- `1` — error (network, API, bad arguments to the tool's own logic)
+- `1` — error (network, API, bad arguments to the tool's own logic). `logout`
+  also exits `1` when it removed the local credentials but could not revoke the
+  token server-side, so the token may still be live — check stderr.
 - `2` — authentication required (not logged in, or the session was rejected)
 
 Caveat for anything scripting against this: `argparse` also exits `2` for its

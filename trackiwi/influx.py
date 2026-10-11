@@ -327,7 +327,7 @@ class InfluxWriter:
         status, _, response = self._request("POST", path, query=query, data=body, headers=headers)
         if 200 <= status < 300:
             return
-        detail = _http.redact(response[:200].decode("utf-8", "replace"), *self._secrets)
+        detail = _http.redact(response.decode("utf-8", "replace"), *self._secrets)[:200]
         if 400 <= status < 500 and _RETENTION_DROP in response:
             # Partial write: the dropped points will never be accepted, so
             # count the batch as acknowledged rather than stall the mirror.
@@ -363,7 +363,7 @@ class InfluxWriter:
             if status == 403:
                 return True, [*lines, "auth OK, bucket not verifiable (write-only token)"]
             if status != 200:
-                detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
+                detail = _http.redact(body.decode("utf-8", "replace"), *self._secrets)[:200]
                 return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
             obj = _as_object(body)
             if obj is None:
@@ -378,7 +378,7 @@ class InfluxWriter:
         if status in (401, 403):
             return False, [*lines, f"credentials rejected (HTTP {status})"]
         if status != 200:
-            detail = _http.redact(body[:200].decode("utf-8", "replace"), *self._secrets)
+            detail = _http.redact(body.decode("utf-8", "replace"), *self._secrets)[:200]
             return False, [*lines, f"database lookup failed (HTTP {status}): {detail}"]
         obj = _as_object(body)
         if obj is None:
@@ -388,7 +388,7 @@ class InfluxWriter:
         if first.get("error"):
             # A 200 body can still carry a per-statement error (e.g. auth).
             # Redact like the non-200 branches: server text can echo a secret.
-            detail = _http.redact(str(first["error"])[:200], *self._secrets)
+            detail = _http.redact(str(first["error"]), *self._secrets)[:200]
             return False, [*lines, f"database lookup rejected: {detail}"]
         series = first.get("series") or [{}]
         first_series = series[0] if series and isinstance(series[0], dict) else {}

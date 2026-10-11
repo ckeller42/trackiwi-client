@@ -173,13 +173,14 @@ def default_config_path() -> Path:
     return root / "trackiwi" / "config.json"
 
 
-def _check(status: int, body: bytes, token: str | None = None) -> None:
+def _check(status: int, body: bytes, *secrets: str | None) -> None:
     """Raise the right error for a non-2xx status, per the app's own handling.
 
     Implements :need:`REQ_TOKEN_NEVER_LOGGED`: the interpolated body is redacted.
     Implements :need:`REQ_NO_REDIRECTS`: a 3xx raises.
 
-    `token`, when given, is this session's own token, scrubbed from the body.
+    `secrets` are values to scrub from the body — the session token, and the
+    password on `login`, since a gateway can echo the request body into a 4xx.
     """
     if 300 <= status < 400:
         # Never success and never "no more data": see `_http.no_redirect_opener`.
@@ -199,7 +200,9 @@ def _check(status: int, body: bytes, token: str | None = None) -> None:
         raise TrackiwiError("rate limited by trackiwi — wait, then re-run", status=status)
     if status == 503:
         raise TrackiwiError("trackiwi is in maintenance — try again later", status=status)
-    detail = _http.redact(body[:200].decode("utf-8", "replace"), token)
+    # Redact first, then truncate: cutting at 200 bytes could split a bare
+    # token so neither the regex nor the exact-match replace catches it (#38).
+    detail = _http.redact(body.decode("utf-8", "replace"), *secrets)[:200]
     raise TrackiwiError(f"API error {status}: {detail}", status=status)
 
 
@@ -407,7 +410,7 @@ class Client:
         status, _, body = self._request(
             "POST", f"{WEBSITE}/api/login", body={"email": email, "password": password}
         )
-        _check(status, body, self.token)
+        _check(status, body, self.token, password)
         data = _decode_json(body)
         # `_decode_json` returns `object`; narrow it for the field reads.
         if not isinstance(data, dict):

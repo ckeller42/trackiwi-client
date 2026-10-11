@@ -174,9 +174,10 @@ Export
    :id: REQ_EXPORT_ATOMIC
    :tags: export
 
-   ``export -o`` writes atomically (temp file plus ``os.replace``), preserves an
-   existing file's mode, follows symlinks, and defaults a new file to 0600.
-   (Design spec §6.)
+   ``export -o`` writes atomically (temp file plus ``os.replace``), refuses a
+   symlink destination, keeps only the owner bits of an existing file's mode,
+   defaults a new file to 0600, and removes the temp file on any failure
+   (Ctrl-C included). (Design spec §6.)
 
 .. req:: A multi-tracker export keeps trackers separate
    :id: REQ_EXPORT_PER_TRACKER

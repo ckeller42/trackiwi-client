@@ -34,7 +34,9 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   (`REQ_TOKEN_REMOVABLE`).
 - **`BrokenPipeError` is success only in `cmd_export`**, where the payload is
   written; `main()` exits 1 so `sync 2>&1 | head -1 && export` cannot run on a
-  partial sync. `_silence_stderr()` is the shared devnull redirect.
+  partial sync. `cmd_export` and `main()` flush stdout inside the `try` so a
+  dead pipe is caught, not left to the interpreter's exit flush (which exits
+  120); `_silence_output()` then points stdout *and* stderr at devnull.
 - **A malformed field means "skip and count the row"**, never crash, never
   store it: non-finite coordinates and `fix_at` outside `_MIN_FIX_AT.._MAX_FIX_AT`.
   `to_gpx` and `to_geojson` raise on such cached rows and `cmd_export` converts
