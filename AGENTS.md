@@ -185,7 +185,6 @@ and CodeRabbit/Dependabot notes).
 
 ## Offset semantics in `sync`
 
-`offset` is **exclusive**, confirmed against a live account (spec §10 item 7).
-If a sync fails with `"trackiwi returned no new records past offset N"`, suspect
-that first: inclusive semantics would make an ordinary no-news sync print
-`0 new positions` and exit 1. Run the live contract test to settle it.
+`offset` is **exclusive** (confirmed live, spec §10 item 7). Suspect this first
+if a sync fails with `"trackiwi returned no new records past offset N"`; the
+live contract test settles it.
