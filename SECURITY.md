@@ -16,11 +16,11 @@ duplicated here.
 If you use the InfluxDB mirror (`trackiwi influx push` / `trackiwi ingest`), two
 more things join that list:
 
-- The **InfluxDB token** (or 1.x password). It is never stored in
-  `influx.toml`; it comes from an environment variable (`TRACKIWI_INFLUX_TOKEN`
-  by default, or the variable `token_env` names), from the file `token_file`
-  names, or — for the systemd timer — from `~/.config/trackiwi/influx.env`
-  (mode `0600`). Protect it like any other credential.
+- The **InfluxDB 2.x token**. It is never stored in `influx.toml`; it comes from
+  an environment variable (`TRACKIWI_INFLUX_TOKEN` by default, or the variable
+  `token_env` names) or — for the systemd timer — from
+  `~/.config/trackiwi/influx.env` (mode `0600`). Protect it like any other
+  credential.
 - The **positions copied into InfluxDB**. The mirror sends the cached movement
   history to the configured bucket, so that bucket (and any Grafana reading it)
   holds the same data as the local cache and deserves the same care. Purging

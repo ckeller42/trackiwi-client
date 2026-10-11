@@ -12,7 +12,7 @@ timer. The way the pieces fit is on the [architecture page](architecture.rst).
 ## What ingest does
 
 ```bash
-trackiwi influx check   # connectivity, version, auth. Read-only.
+trackiwi influx check   # connectivity, auth, bucket. Read-only.
 trackiwi influx push    # send cached positions not yet mirrored
 trackiwi ingest         # sync, refresh tracker names, then push: what a timer runs
 ```
@@ -65,11 +65,11 @@ a network you trust. Behind them is the vehicle's complete movement history.
 1. Install so the command lands in `~/.local/bin/trackiwi`, where the unit's `ExecStart` looks:
    `pipx install .` (edit `ExecStart` if you installed elsewhere).
 2. Copy `examples/influx.example.toml` to `~/.config/trackiwi/influx.toml` (mode `0600`) and
-   fill in `url`, `org` and `bucket`. Every key can be overridden by `TRACKIWI_INFLUX_<KEY>`
-   in the environment. For InfluxDB 1.x set `version = 1` and `database`.
+   fill in `url`, `org` and `bucket` (InfluxDB 2.x or Cloud only). Every key can be overridden
+   by `TRACKIWI_INFLUX_<KEY>` in the environment.
 3. Give the timer the token. A systemd user unit does not see variables from your shell rc: put
-   it in `~/.config/trackiwi/influx.env` (mode `0600`) as `TRACKIWI_INFLUX_TOKEN=<token>`, or
-   name a file with `token_file` in `influx.toml`. Never put the token in `influx.toml` itself.
+   it in `~/.config/trackiwi/influx.env` (mode `0600`) as `TRACKIWI_INFLUX_TOKEN=<token>`.
+   Never put the token in `influx.toml` itself.
 4. Run `trackiwi ingest` once by hand while trackiwi is reachable. `influx push` only sends
    positions whose tracker name is already known, and `ingest` is what stores the names.
    `trackiwi influx check` verifies the InfluxDB side.

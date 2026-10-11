@@ -1,16 +1,16 @@
-"""Write cached positions to InfluxDB.
+"""Write cached positions to InfluxDB 2.x.
 
 The only module that talks to InfluxDB. It never imports `client.py`, and
 `client.py` never imports it. Configuration lives in
 ``~/.config/trackiwi/influx.toml`` and every key can be overridden by an
-environment variable named ``TRACKIWI_INFLUX_<KEY>``. Secrets are never
-stored in the TOML file: the token comes from the variable named by
-``token_env`` or from ``token_file``.
+environment variable named ``TRACKIWI_INFLUX_<KEY>``. The token is never
+stored in the TOML file: it comes from the variable named by ``token_env``
+(default ``TRACKIWI_INFLUX_TOKEN``). InfluxDB 1.x is not supported; git holds
+the 1.x path if it is ever needed again.
 """
 
 from __future__ import annotations
 
-import base64
 import contextlib
 import gzip
 import json
@@ -31,17 +31,7 @@ from .store import Store
 
 ENV_PREFIX = "TRACKIWI_INFLUX_"
 DEFAULT_TOKEN_ENV = "TRACKIWI_INFLUX_TOKEN"
-_KEYS = (
-    "url",
-    "version",
-    "org",
-    "bucket",
-    "database",
-    "username",
-    "token_env",
-    "token_file",
-    "password_file",
-)
+_KEYS = ("url", "org", "bucket", "token_env")
 
 
 def default_influx_config_path() -> Path:
@@ -53,16 +43,12 @@ def default_influx_config_path() -> Path:
 
 @dataclass(frozen=True)
 class InfluxConfig:
-    """A resolved InfluxDB target. `version` None means auto-detect."""
+    """A resolved InfluxDB 2.x target."""
 
     url: str
-    version: int | None
     org: str | None
     bucket: str | None
-    database: str | None
-    username: str | None
     token: str | None
-    password: str | None
     token_env: str
 
 
@@ -84,36 +70,9 @@ def _read_file(path: Path) -> dict[str, Any]:
         if key not in _KEYS:
             raise TrackiwiError(
                 f"{path}: unknown key '{key}' (allowed: {', '.join(_KEYS)}); "
-                "secrets belong in token_file or an environment variable"
+                "the token belongs in an environment variable, not this file"
             )
     return data
-
-
-def _read_secret(path_text: str, what: str) -> str:
-    """Read a secret from a file, stripping surrounding whitespace.
-
-    Self-heals the file to 0600, as the session and config files do: a
-    ``token_file``/``password_file`` (or a ``.env`` copied from the template)
-    is otherwise left at the umask default, usually world-readable (#40).
-    """
-    path = Path(path_text).expanduser()
-    try:
-        secret = path.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        raise TrackiwiError(f"cannot read {what} file {path}: {error.strerror}") from error
-    with contextlib.suppress(OSError):
-        os.chmod(path, 0o600)
-    return secret
-
-
-def _parse_version(raw: Any) -> int | None:
-    """Map the configured version to 1, 2, or None (auto)."""
-    text = str(raw).strip().lower()
-    if text in ("", "auto"):
-        return None
-    if text in ("1", "2"):
-        return int(text)
-    raise TrackiwiError(f'invalid InfluxDB version {raw!r}: use "auto", 1 or 2')
 
 
 def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) -> InfluxConfig:
@@ -148,11 +107,6 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
         )
     token_env = str(merged.get("token_env") or DEFAULT_TOKEN_ENV)
     token = env.get(token_env) or None
-    if token is None and merged.get("token_file"):
-        token = _read_secret(str(merged["token_file"]), "token")
-    password = env.get(ENV_PREFIX + "PASSWORD") or None
-    if password is None and merged.get("password_file"):
-        password = _read_secret(str(merged["password_file"]), "password")
 
     def text(key: str) -> str | None:
         value = merged.get(key)
@@ -160,13 +114,9 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
     return InfluxConfig(
         url=url,
-        version=_parse_version(merged.get("version", "auto")),
         org=text("org"),
         bucket=text("bucket"),
-        database=text("database"),
-        username=text("username"),
         token=token.strip() if token else None,
-        password=password,
         token_env=token_env,
     )
 
@@ -190,7 +140,7 @@ def _as_object(body: bytes) -> dict[str, Any] | None:
 
 
 class InfluxWriter:
-    """Talks to one InfluxDB target: detect the version, write, check.
+    """Talks to one InfluxDB 2.x target: write and check.
 
     Implements :need:`REQ_INFLUX_WRITE_SCOPE` and
     :need:`REQ_INFLUX_TOKEN_REDACT`. Redirects are never followed, so a 3xx
@@ -201,18 +151,14 @@ class InfluxWriter:
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
         self.config = config
         self.opener = opener or _http.no_redirect_opener(proxy=False).open
-        self._version = config.version
-        self._secrets = (config.token, config.password)
+        self._secrets = (config.token,)
 
     # -- transport -----------------------------------------------------------
 
     def _auth_headers(self) -> dict[str, str]:
-        """Authorization header for the detected version, if credentials exist."""
-        if self.version == 2 and self.config.token:
+        """The ``Token`` authorization header, when a token is configured."""
+        if self.config.token:
             return {"Authorization": f"Token {self.config.token}"}
-        if self.version == 1 and self.config.username:
-            raw = f"{self.config.username}:{self.config.password or ''}".encode()
-            return {"Authorization": "Basic " + base64.b64encode(raw).decode("ascii")}
         return {}
 
     def _request(
@@ -257,57 +203,24 @@ class InfluxWriter:
             )
         return result
 
-    # -- version -------------------------------------------------------------
-
-    def detect_version(self) -> int:
-        """Read the major version from the ``X-Influxdb-Version`` header of ``/ping``."""
-        _, headers, _ = self._request("GET", "/ping")
-        raw = (headers.get("X-Influxdb-Version") or "").strip()
-        text = raw.lstrip("vV")
-        if text[:1] in ("1", "2"):
-            return int(text[0])
-        if raw.lower().startswith("cloud"):
-            return 2
-        raise TrackiwiError(
-            f"could not detect the InfluxDB version at {self.config.url} "
-            f"(X-Influxdb-Version: {raw or 'missing'}); set version = 1 or 2 in influx.toml"
-        )
-
-    @property
-    def version(self) -> int:
-        """The target's major version, detected on first use unless configured."""
-        if self._version is None:
-            self._version = self.detect_version()
-        return self._version
-
     def target_key(self) -> str:
         """Stable identity of this target for mirror bookkeeping; no secrets."""
-        if self.version == 2:
-            return f"{self.config.url}|v2|{self.config.org}/{self.config.bucket}"
-        return f"{self.config.url}|v1|{self.config.database}"
+        return f"{self.config.url}|v2|{self.config.org}/{self.config.bucket}"
 
     # -- write ---------------------------------------------------------------
 
     def _write_endpoint(self) -> tuple[str, dict[str, str]]:
         """Path and query for a write, validating the settings it needs."""
         cfg = self.config
-        if self.version == 2:
-            if not cfg.token:
-                raise TrackiwiError(
-                    f"InfluxDB 2.x needs a token: set ${cfg.token_env} or token_file"
-                )
-            if not cfg.org or not cfg.bucket:
-                raise TrackiwiError("InfluxDB 2.x needs 'org' and 'bucket' configured")
-            return "/api/v2/write", {"org": cfg.org, "bucket": cfg.bucket, "precision": "s"}
-        if not cfg.database:
-            raise TrackiwiError("InfluxDB 1.x needs 'database' configured")
-        return "/write", {"db": cfg.database, "precision": "s"}
+        if not cfg.token:
+            raise TrackiwiError(f"InfluxDB needs a token: set ${cfg.token_env}")
+        if not cfg.org or not cfg.bucket:
+            raise TrackiwiError("InfluxDB needs 'org' and 'bucket' configured")
+        return "/api/v2/write", {"org": cfg.org, "bucket": cfg.bucket, "precision": "s"}
 
     def _target_name(self) -> str:
         """Human name of the write destination, for error messages."""
-        if self.version == 2:
-            return f"bucket '{self.config.bucket}' in org '{self.config.org}'"
-        return f"database '{self.config.database}'"
+        return f"bucket '{self.config.bucket}' in org '{self.config.org}'"
 
     def write(self, lines: Sequence[str]) -> None:
         """POST one gzipped batch of line protocol; raise unless acknowledged.
@@ -349,53 +262,28 @@ class InfluxWriter:
     # -- check ---------------------------------------------------------------
 
     def check(self) -> tuple[bool, list[str]]:
-        """Probe connectivity, version and auth. Read-only: writes nothing."""
-        lines = [f"InfluxDB {self.version}.x at {self.config.url}"]
-        if self.version == 2:
-            status, _, body = self._request(
-                "GET",
-                "/api/v2/buckets",
-                query={"org": self.config.org or "", "name": self.config.bucket or ""},
-                headers=self._auth_headers(),
-            )
-            if status == 401:
-                return False, [*lines, "token rejected (HTTP 401)"]
-            if status == 403:
-                return True, [*lines, "auth OK, bucket not verifiable (write-only token)"]
-            if status != 200:
-                detail = _http.redact(body.decode("utf-8", "replace"), *self._secrets)[:200]
-                return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
-            obj = _as_object(body)
-            if obj is None:
-                return False, [*lines, "bucket lookup returned an unexpected response"]
-            found = obj.get("buckets") or []
-            if any(isinstance(b, dict) and b.get("name") == self.config.bucket for b in found):
-                return True, [*lines, f"bucket '{self.config.bucket}' found"]
-            return False, [*lines, f"bucket '{self.config.bucket}' not found"]
+        """Probe connectivity, auth and the bucket. Read-only: writes nothing."""
+        lines = [f"InfluxDB 2.x at {self.config.url}"]
         status, _, body = self._request(
-            "GET", "/query", query={"q": "SHOW DATABASES"}, headers=self._auth_headers()
+            "GET",
+            "/api/v2/buckets",
+            query={"org": self.config.org or "", "name": self.config.bucket or ""},
+            headers=self._auth_headers(),
         )
-        if status in (401, 403):
-            return False, [*lines, f"credentials rejected (HTTP {status})"]
+        if status == 401:
+            return False, [*lines, "token rejected (HTTP 401)"]
+        if status == 403:
+            return True, [*lines, "auth OK, bucket not verifiable (write-only token)"]
         if status != 200:
             detail = _http.redact(body.decode("utf-8", "replace"), *self._secrets)[:200]
-            return False, [*lines, f"database lookup failed (HTTP {status}): {detail}"]
+            return False, [*lines, f"bucket lookup failed (HTTP {status}): {detail}"]
         obj = _as_object(body)
         if obj is None:
-            return False, [*lines, "database lookup returned an unexpected response"]
-        results = obj.get("results") or [{}]
-        first = results[0] if results and isinstance(results[0], dict) else {}
-        if first.get("error"):
-            # A 200 body can still carry a per-statement error (e.g. auth).
-            # Redact like the non-200 branches: server text can echo a secret.
-            detail = _http.redact(str(first["error"]), *self._secrets)[:200]
-            return False, [*lines, f"database lookup rejected: {detail}"]
-        series = first.get("series") or [{}]
-        first_series = series[0] if series and isinstance(series[0], dict) else {}
-        names = {row[0] for row in first_series.get("values") or [] if row}
-        if self.config.database in names:
-            return True, [*lines, f"database '{self.config.database}' found"]
-        return False, [*lines, f"database '{self.config.database}' not found"]
+            return False, [*lines, "bucket lookup returned an unexpected response"]
+        found = obj.get("buckets") or []
+        if any(isinstance(b, dict) and b.get("name") == self.config.bucket for b in found):
+            return True, [*lines, f"bucket '{self.config.bucket}' found"]
+        return False, [*lines, f"bucket '{self.config.bucket}' not found"]
 
 
 BATCH_SIZE = 5000

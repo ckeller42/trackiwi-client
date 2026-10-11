@@ -24,7 +24,6 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("TRACKIWI_INFLUX_URL", "http://influx.example.invalid:8086")
-    monkeypatch.setenv("TRACKIWI_INFLUX_VERSION", "2")
     monkeypatch.setenv("TRACKIWI_INFLUX_ORG", "home")
     monkeypatch.setenv("TRACKIWI_INFLUX_BUCKET", "trackiwi")
     monkeypatch.setenv("TRACKIWI_INFLUX_TOKEN", "tok")
