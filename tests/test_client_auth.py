@@ -51,6 +51,19 @@ def test_login_saves_config_owner_only():
     assert stat.S_IMODE(os.stat(path.parent).st_mode) == 0o700
 
 
+def test_login_error_body_scrubs_the_password():
+    """A gateway that echoes the request body into a 4xx must not put the
+    password on stderr (#38)."""
+    pw = "login-value-xyz"  # pragma: allowlist secret
+    body = (
+        b'{"email":"a@b.invalid","password":"login-value-xyz"} rejected'  # pragma: allowlist secret
+    )
+    opener = FakeOpener(FakeResponse(body, status=400))
+    with pytest.raises(TrackiwiError) as excinfo:
+        Client(opener=opener).login("a@b.invalid", pw)
+    assert pw not in str(excinfo.value)
+
+
 def test_save_converts_a_filesystem_error(monkeypatch):
     """A read-only mount must not crash login with a raw OSError (#20)."""
 

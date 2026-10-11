@@ -115,6 +115,21 @@ def test_a_read_only_endpoint_redacts_a_token_echoed_in_an_error_body(method, pa
     assert "tok-secret-123" not in str(excinfo.value)
 
 
+def test_a_bare_token_straddling_the_truncation_point_is_redacted():
+    """Redaction runs before the 200-byte cut, so a token split at the boundary
+    cannot leak a prefix (#38)."""
+    secret = "tok-straddle-0123456789"  # pragma: allowlist secret  # gitleaks:allow
+    body = b"A" * 185 + secret.encode() + b"-tail"
+    c = Client(
+        api_base="https://api.example.invalid",
+        token=secret,
+        opener=FakeOpener(FakeResponse(body, status=500)),
+    )
+    with pytest.raises(TrackiwiError) as excinfo:
+        c.trackers()
+    assert secret[:10] not in str(excinfo.value)
+
+
 @pytest.mark.parametrize(("method", "path", "body"), ENDPOINTS)
 def test_a_read_only_endpoint_hides_a_non_json_body(method, path, body):
     """A WAF or gateway answering 200 with HTML must not reach the message:

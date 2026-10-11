@@ -116,22 +116,20 @@ def test_export_write_failure_does_not_clobber_a_previous_export(tmp_path, monke
     assert list(tmp_path.glob(".out.csv.*.tmp")) == []
 
 
-def test_export_to_existing_file_preserves_mode(tmp_path):
+def test_export_to_existing_file_keeps_only_owner_bits(tmp_path):
+    """A pre-created world-readable target must not make the export world-
+    readable: only the owner bits of its mode are kept (#25)."""
     import os
     import stat
 
     seed_cache()
     target = tmp_path / "out.csv"
     target.write_text("previous export\n")
-    # Make it world-readable (0644).
-    os.chmod(target, stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
-    mode_before = stat.S_IMODE(os.stat(target).st_mode)
-    assert mode_before == 0o644
+    os.chmod(target, 0o644)
 
     assert main(["export", "--format", "csv", "-o", str(target)]) == 0
 
-    mode_after = stat.S_IMODE(os.stat(target).st_mode)
-    assert mode_after == 0o644
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o600
 
 
 def test_export_to_new_file_creates_mode_0600(tmp_path):
@@ -148,7 +146,9 @@ def test_export_to_new_file_creates_mode_0600(tmp_path):
     assert mode == 0o600
 
 
-def test_export_to_symlink_follows_and_preserves_symlink(tmp_path):
+def test_export_to_a_symlink_is_refused(tmp_path, capsys):
+    """Following a symlink could overwrite an unrelated file or copy the
+    history into its world-readable target (#25); refuse it."""
     import os
 
     seed_cache()
@@ -157,13 +157,28 @@ def test_export_to_symlink_follows_and_preserves_symlink(tmp_path):
     symlink = tmp_path / "link.csv"
     os.symlink(real_file, symlink)
 
-    assert main(["export", "--format", "csv", "-o", str(symlink)]) == 0
-
-    # Verify the symlink still exists and still points to real_file.
+    assert main(["export", "--format", "csv", "-o", str(symlink)]) == 1
+    assert "symlink" in capsys.readouterr().err
+    # The link and its target are untouched.
     assert symlink.is_symlink()
-    assert os.readlink(symlink) == str(real_file)
-    # Verify the real file was updated.
-    assert real_file.read_text() != "original content\n"
+    assert real_file.read_text() == "original content\n"
+
+
+def test_export_leaves_no_tmp_file_on_keyboard_interrupt(tmp_path, monkeypatch):
+    """Ctrl-C between mkstemp and replace must not leave a .tmp holding
+    positions behind (#25)."""
+    seed_cache()
+    target = tmp_path / "out.csv"
+
+    def interrupt(*_args, **_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("trackiwi.cli.os.replace", interrupt)
+    # main() catches KeyboardInterrupt and returns 1; the finally cleanup runs
+    # first, so no temp file is left behind.
+    assert main(["export", "--format", "csv", "-o", str(target)]) == 1
+    assert list(tmp_path.glob(".out.csv.*.tmp")) == []
+    assert not target.exists()
 
 
 # --- Fix 2: `login --token` requires `--api-base`, and vice versa ---
@@ -457,6 +472,21 @@ def test_export_survives_a_closed_pipe(monkeypatch, capsys):
     assert main(["export", "--format", "csv"]) == 0
 
 
+def test_export_survives_a_pipe_that_dies_only_at_flush(monkeypatch, capsys):
+    """Output smaller than the pipe buffer: write() succeeds, the flush fails.
+    That flush used to escape to the interpreter and exit 120 (#37)."""
+    seed_cache()
+    raised = {"done": False}
+
+    def broken_flush():
+        if not raised["done"]:
+            raised["done"] = True
+            raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr("sys.stdout.flush", broken_flush)
+    assert main(["export", "--format", "csv"]) == 0
+
+
 def test_login_without_email_on_closed_stdin_reports_a_clean_error(monkeypatch, capsys):
     def eof(*_args, **_kwargs):
         raise EOFError
@@ -501,7 +531,8 @@ def test_logout_on_revocation_failure_warns_to_stderr(capsys, monkeypatch):
 
     monkeypatch.setattr("trackiwi.cli.Client", StubClient)
 
-    assert main(["logout"]) == 0
+    # Revocation failed (token may still be valid) → exit 1, visible to a script (#36).
+    assert main(["logout"]) == 1
     assert calls == [True]
     err = capsys.readouterr().err
     assert "could not revoke" in err.lower()
@@ -567,7 +598,7 @@ def test_logout_with_an_http_api_base_still_removes_the_credentials(capsys):
     path = _write_raw_config(
         '{"api_base": "http://api.example.invalid", "token": "live-token", "user_id": 1}'
     )
-    assert main(["logout"]) == 0
+    assert main(["logout"]) == 1  # credentials removed, but the token may still be live (#36)
     err = capsys.readouterr().err
     assert not path.exists()
     assert "may still be valid" in err.lower()
@@ -589,7 +620,7 @@ def test_logout_with_an_unloadable_config_still_removes_the_credentials(raw, cap
     """Only the `http://` case fell back to deleting; every other config that
     `Client.load()` refuses left the token on disk and exited 1 (issue #17)."""
     path = _write_raw_config(raw)
-    assert main(["logout"]) == 0
+    assert main(["logout"]) == 1  # the token may still be valid (#36)
     err = capsys.readouterr().err
     assert not path.exists()
     assert "may still be valid" in err.lower()
@@ -616,6 +647,9 @@ def test_sync_with_a_dead_stderr_does_not_report_success(monkeypatch):
             raise BrokenPipeError(32, "Broken pipe")
 
     monkeypatch.setattr("sys.stderr", DeadStderr())
+    # Give stdout a fileno-less stream too: main()'s broken-pipe handler now
+    # redirects stdout's fd, which would clobber the test runner's real fd 1.
+    monkeypatch.setattr("sys.stdout", io.StringIO())
     assert main(["sync"]) != 0
 
 

@@ -48,43 +48,51 @@ def _write_atomically(path: str, text: str) -> None:
     Implements :need:`REQ_EXPORT_ATOMIC`.
 
     Renders to a temp file beside the target, then `os.replace()`s it over.
-    Symlinks are followed; an existing target keeps its mode, a new file is
-    0600. Any `OSError` becomes a `TrackiwiError`.
+    A symlink destination is refused (following it could overwrite an unrelated
+    file, or copy the history into a world-readable target); only the owner
+    bits of an existing target's mode are kept, a new file is 0600; the temp
+    file is removed on any failure, Ctrl-C included (#25). Any `OSError`
+    becomes a `TrackiwiError`.
     """
-    # Resolve the destination, following symlinks to their real path.
-    real_target = Path(os.path.realpath(path))
+    target = Path(path)
+    if target.is_symlink():
+        raise TrackiwiError(f"could not write {path}: refusing to write through a symlink")
     tmp_path: Path | None = None
+    replaced = False
     try:
-        # Create temp file in the same directory as the real target.
-        fd, tmp_name = tempfile.mkstemp(
-            dir=real_target.parent, prefix=f".{real_target.name}.", suffix=".tmp"
-        )
+        fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
         tmp_path = Path(tmp_name)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-
-        # If the destination exists, preserve its mode.
-        # New files stay at 0600 (mkstemp default); updated files keep their chosen mode.
-        if real_target.exists():
-            mode = stat.S_IMODE(os.stat(real_target).st_mode)
+        # Keep only the owner bits of an existing target: a pre-created
+        # world-readable file must not make the export world-readable.
+        if target.exists():
+            mode = stat.S_IMODE(os.stat(target).st_mode) & 0o700
             os.chmod(tmp_path, mode)
-
-        os.replace(tmp_path, real_target)
+        os.replace(tmp_path, target)
+        replaced = True
     except OSError as error:
-        with contextlib.suppress(OSError):
-            if tmp_path is not None:
-                tmp_path.unlink(missing_ok=True)
         raise TrackiwiError(f"could not write {path}: {error}") from error
+    finally:
+        # A KeyboardInterrupt between mkstemp and replace would otherwise leave
+        # a `.<name>.XXXX.tmp` holding positions behind.
+        if tmp_path is not None and not replaced:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink(missing_ok=True)
 
 
-def _silence_stderr() -> None:
-    """Point fd 2 at /dev/null so CPython's exit flush stays quiet.
+def _silence_output() -> None:
+    """Point stdout *and* stderr at /dev/null after a broken pipe.
 
-    `io.UnsupportedOperation` (e.g. under `capsys`) is an `OSError` and a
-    `ValueError`, and is swallowed.
+    The status-120 bug was redirecting only stderr: the buffered stdout the
+    interpreter flushes at exit then still hit the dead pipe (#37). Redirecting
+    stdout's fd makes that final flush a no-op. `io.UnsupportedOperation` (e.g.
+    under `capsys`) is an `OSError` and a `ValueError`, and is swallowed.
     """
     with contextlib.suppress(OSError, ValueError):
-        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.dup2(devnull, sys.stderr.fileno())
 
 
 def _read_token() -> str:
@@ -151,18 +159,20 @@ def cmd_logout(_: argparse.Namespace) -> int:
             "Revoke it in the trackiwi app.",
             file=sys.stderr,
         )
-        return 0
+        # The one security-relevant failure (a token possibly still live) must
+        # be visible to a script, so `logout && …` does not run on (#36).
+        return 1
     revoked = client.logout()
     if revoked:
         print("Session revoked and local credentials removed.")
-    else:
-        print(
-            "Could not revoke the session (network or server error).\n"
-            "Local credentials have been removed, but the token may still be valid.\n"
-            "Revoke it in the trackiwi app.",
-            file=sys.stderr,
-        )
-    return 0
+        return 0
+    print(
+        "Could not revoke the session (network or server error).\n"
+        "Local credentials have been removed, but the token may still be valid.\n"
+        "Revoke it in the trackiwi app.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _cell(value: object) -> str:
@@ -360,7 +370,9 @@ def _push() -> None:
     """Mirror new cached rows to InfluxDB."""
     writer = InfluxWriter(load_config())
     if not default_db_path().exists():
-        print("nothing cached yet — run 'trackiwi sync' first")
+        # Notices go to stderr (as `heading` does), so in `ingest` they do not
+        # land among the pushed-data lines on stdout (#36).
+        print("nothing cached yet — run 'trackiwi sync' first", file=sys.stderr)
         return
     with Store() as store:
         sent = mirror(store, writer)
@@ -457,9 +469,10 @@ def cmd_export(args: argparse.Namespace) -> int:
         return 0
     try:
         sys.stdout.write(text)
+        sys.stdout.flush()  # surface a dead pipe here, not at the exit flush (#37)
     except BrokenPipeError:
         # `export | head`: the reader left; the only place a dead pipe is success.
-        _silence_stderr()
+        _silence_output()
     return 0
 
 
@@ -624,6 +637,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         # `args.func` is `Any`; the annotation pins the exit code to `int`.
         exit_code: int = args.func(args)
+        # Flush buffered output now, inside the try, so a reader that left
+        # (`trackers | head`) is caught here and not by the interpreter's exit
+        # flush, which would print a traceback and exit 120 (#37).
+        sys.stdout.flush()
         return exit_code
     except AuthError as error:
         print(f"authentication required: {error}", file=sys.stderr)
@@ -635,7 +652,7 @@ def main(argv: list[str] | None = None) -> int:
     except BrokenPipeError:
         # A dead pipe outside the export payload means an unfinished command:
         # exit 1. Nothing is printed; the stream just failed.
-        _silence_stderr()
+        _silence_output()
         return 1
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
