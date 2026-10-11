@@ -121,9 +121,10 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   `epoch_from_iso`, `parse_positions`), synthetic values only.
 - **Gates:** `interrogate` fail-under 100 on the public surface (shorten a
   docstring, never delete it); coverage `--cov-fail-under=95`.
-- **Three secret scanners, deliberately:** gitleaks (`.gitleaks.toml`),
-  `detect-secrets` (`.secrets.baseline`, regenerate and audit before committing)
-  and `SECRET_RE` in `tools/check_no_private_data.py`. Keep all three.
+- **Two secret scanners:** gitleaks (`.gitleaks.toml`) and `detect-secrets`
+  (`.secrets.baseline`, regenerate and audit before committing). Keep both.
+  `tools/check_no_private_data.py` is the *data* guard (databases, track
+  exports under any name, credential files) — not a token scanner.
 - `python -m trackiwi …` runs straight from a clone.
 - **Architecture diagrams** (LikeC4 model `docs/model/architecture.c4`, shown by `docs/architecture.rst`; the doc build needs
   node 20+). When a module boundary changes, update the model: `tests/test_architecture_doc.py`
@@ -146,9 +147,10 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
 - `pre-commit run --all-files` only checks git-tracked files: `git add` new
   files before running the gate.
 - `*.json` and `*.xml` are gitignored as track exports; a legitimate one needs
-  `git add -f` (the dashboard is re-included). Docs cannot quote a full 40-char
-  SHA (use short SHAs or `# allow-secret`); SHA-pinned actions in
-  `.github/workflows/` are exempt. Resolve a pin with
+  `git add -f` (the dashboard is re-included). A high-entropy or token-shaped
+  literal (a long hex/base64 string) may trip detect-secrets or gitleaks; mark
+  the line with `# pragma: allowlist secret` (detect-secrets) and/or
+  `# gitleaks:allow`. Resolve a SHA pin with
   `git ls-remote https://github.com/<owner>/<repo> refs/tags/<tag>` (use `^{}`).
 - Grafana Flux queries use `"${bucket}"` / `"${tracker}"`; only built-ins are `v.*`.
 - Live tests are skipped by default: `TRACKIWI_LIVE=1 .venv/bin/pytest -m live -s -v`

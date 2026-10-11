@@ -28,9 +28,9 @@ Verifying tests
    :verifies: REQ_NO_PRIVATE_DATA
 
    ``tests/test_check_no_private_data.py::test_database_is_blocked``,
-   ``tests/test_check_no_private_data.py::test_token_shaped_string_is_blocked``,
-   ``tests/test_check_no_private_data.py::test_sha_pinned_action_in_a_workflow_passes``,
-   ``tests/test_check_no_private_data.py::test_sha_pin_exemption_is_scoped_to_workflows``,
+   ``tests/test_check_no_private_data.py::test_sqlite_header_is_blocked_regardless_of_name``,
+   ``tests/test_check_no_private_data.py::test_geojson_saved_as_json_is_blocked``,
+   ``tests/test_check_no_private_data.py::test_a_csv_export_under_a_plain_txt_name_is_blocked``,
    ``tests/test_check_no_private_data.py::test_influx_credential_files_are_blocked``,
    ``tests/test_check_no_private_data.py::test_influx_templates_stay_committable``
 
