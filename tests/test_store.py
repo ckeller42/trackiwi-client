@@ -87,32 +87,40 @@ def test_default_path_respects_xdg(monkeypatch, tmp_path):
     assert default_db_path() == tmp_path / "trackiwi" / "positions.db"
 
 
-def test_failed_batch_is_rolled_back(tmp_path):
+def test_a_constraint_violating_row_is_ignored_not_the_whole_batch(tmp_path):
+    """INSERT OR IGNORE: a row that violates a constraint (a NULL latitude that
+    somehow reached the store) is skipped and not counted, and does not abort
+    the valid rows in the same batch (#32)."""
     path = tmp_path / "positions.db"
     ok = (1, 7, 1758000000, 120, 31.0, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
-    null = (
-        2,
-        7,
-        1758000060,
-        120,
-        None,
-        -41.0,
-        12,
-        0.0,
-        0,
-        0,
-        -71,
-        9,
-        98,
-        4120,
-    )  # latitude NOT NULL
-    try:
-        with Store(path) as s:
-            s.upsert([ok, null])
-    except sqlite3.IntegrityError:
-        pass
+    null = (2, 7, 1758000060, 120, None, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
     with Store(path) as s:
+        assert s.upsert([ok, null]) == 1
+    with Store(path) as s:
+        assert s.count() == 1
+
+
+def test_create_false_on_a_missing_cache_reads_empty_without_creating_it(tmp_path):
+    """A read-only command opens with create=False: a never-created cache reads
+    empty and the file is not brought into being (#32)."""
+    path = tmp_path / "positions.db"
+    with Store(path, create=False) as s:
         assert s.count() == 0
+        assert s.query() == []
+        assert s.max_id() is None
+    assert not path.exists()
+
+
+def test_an_already_stored_position_is_never_rewritten(tmp_path):
+    """INSERT OR IGNORE: a re-fetched row keeps its stored value, so a point the
+    mirror already sent cannot change under it (#32)."""
+    path = tmp_path / "positions.db"
+    original = (1, 7, 1758000000, 120, 31.0, -41.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
+    changed = (1, 7, 1758000000, 120, 99.0, -99.0, 12, 0.0, 0, 0, -71, 9, 98, 4120)
+    with Store(path) as s:
+        assert s.upsert([original]) == 1
+        assert s.upsert([changed]) == 0  # same id: ignored, not replaced
+        assert s.query()[0]["latitude"] == 31.0
 
 
 def test_database_is_created_owner_only_without_relying_on_chmod(tmp_path, monkeypatch):

@@ -43,9 +43,11 @@ names the code or `REQ_*` (in `docs/requirements.rst`) that owns the reason.
   it; `to_csv` is a raw dump and deliberately does not. `parse_positions`
   returns the highest id on the page, skipped rows included, and `sync`
   advances to it (`REQ_SYNC_PAST_MALFORMED`).
-- **Read-only commands must not create the cache.** `export` and `purge` touch
-  the database only if it exists; `purge` unlinks via `store.cache_files`
-  without opening it, so it works on a corrupt file.
+- **Read-only commands must not create the cache.** `export` and `heading` open
+  `Store(create=False)`, so a missing cache reads empty and the file is never
+  created (the invariant lives in `Store.__enter__`, not hand-copied `exists()`
+  checks); `purge` unlinks via `store.cache_files` without opening it, so it
+  works on a corrupt file.
 - **Only a *corrupt* cache may be told to run `purge --yes`.** A locked/busy
   `sqlite3.OperationalError` gets "wait and re-run" (see `Store._open_failure`;
   check the lock case first, it subclasses `DatabaseError`).

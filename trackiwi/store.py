@@ -101,8 +101,9 @@ def cache_files(path: Path) -> tuple[Path, ...]:
 class Store:
     """Owner-only SQLite cache of position rows."""
 
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(self, path: Path | str | None = None, *, create: bool = True) -> None:
         self.path = Path(path) if path is not None else default_db_path()
+        self.create = create
         self._conn: sqlite3.Connection | None = None
 
     def __enter__(self) -> Store:
@@ -112,7 +113,17 @@ class Store:
         self-healing a widened mode) and :need:`REQ_PURGE_NOT_ON_LOCK` (a
         locked cache is reported as transient, never as corruption to purge),
         the latter via :meth:`_open_failure`.
+
+        With ``create=False`` a missing cache is **not** created: an in-memory
+        empty database answers every read, so a read-only command (``export``,
+        ``heading``) never brings the file into being.
         """
+        if not self.create and not self.path.exists():
+            conn = sqlite3.connect(":memory:")
+            conn.row_factory = sqlite3.Row
+            conn.executescript(_SCHEMA)
+            self._conn = conn
+            return self
         # Create at 0600 before sqlite3 can create it at the umask default (no
         # chmod window). O_CREAT's mode applies to new files only; the chmod
         # below heals an existing one. mkdir/chmod are inside the guard too: a
@@ -183,18 +194,20 @@ class Store:
 
     @_converts_sqlite_errors
     def upsert(self, rows: Iterable[tuple[Any, ...]]) -> int:
-        """Insert or replace `rows`, returning how many were *newly inserted*.
+        """Insert new `rows`, returning how many were *newly inserted*.
 
-        The count is a row-count delta, since `INSERT OR REPLACE` cannot tell
-        an insert from a replace.
+        ``INSERT OR IGNORE``: positions are immutable fixes keyed by the
+        vendor's own id, so an id already stored is kept unchanged — a
+        re-fetched row (e.g. from ``sync --full``) is never rewritten, which
+        could otherwise change a point the mirror has already sent. The
+        inserted count comes straight from ``cursor.rowcount`` (a row that
+        violates a constraint is ignored, not stored, and not counted).
         """
         placeholders = ",".join("?" * len(COLUMNS))
-        sql = f"INSERT OR REPLACE INTO positions ({','.join(COLUMNS)}) VALUES ({placeholders})"
-        rows = list(rows)
-        before = self.count()
-        self.conn.executemany(sql, rows)
+        sql = f"INSERT OR IGNORE INTO positions ({','.join(COLUMNS)}) VALUES ({placeholders})"
+        cursor = self.conn.executemany(sql, list(rows))
         self.conn.commit()
-        return self.count() - before
+        return cursor.rowcount
 
     @_converts_sqlite_errors
     def max_id(self) -> int | None:

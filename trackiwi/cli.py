@@ -452,11 +452,8 @@ def cmd_export(args: argparse.Namespace) -> int:
     end = _epoch(args.end, end_of_day=True) if args.end else None
     if start is not None and end is not None and start > end:
         raise TrackiwiError("--from date is after --to date")
-    if default_db_path().exists():
-        with Store() as store:
-            rows = store.query(tracker_id=args.tracker, start=start, end=end)
-    else:
-        rows = []
+    with Store(create=False) as store:
+        rows = store.query(tracker_id=args.tracker, start=start, end=end)
     try:
         text = FORMATS[args.format](rows)
     except (ValueError, OverflowError, OSError) as error:
@@ -512,11 +509,8 @@ def cmd_heading(args: argparse.Namespace) -> int:
         raise TrackiwiError("--stale-after must be zero or more seconds")
     if args.min_speed < 0:
         raise TrackiwiError("--min-speed must be zero or more km/h")
-    if default_db_path().exists():
-        with Store() as store:
-            rows = store.query(tracker_id=args.tracker)
-    else:
-        rows = []
+    with Store(create=False) as store:
+        rows = store.query(tracker_id=args.tracker)
     headings = estimate_headings(rows, stale_after=args.stale_after, min_speed=args.min_speed)
     if args.tracker is not None and args.tracker not in headings:
         headings[args.tracker] = Heading(None, "unknown", "none", None, None)
