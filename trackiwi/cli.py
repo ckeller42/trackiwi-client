@@ -21,7 +21,12 @@ from typing import Any
 
 from .client import AuthError, Client, TrackiwiError
 from .export import FORMATS
-from .heading import DEFAULT_STALE_AFTER, Heading, estimate_headings
+from .heading import (
+    DEFAULT_MIN_MOVING_SPEED,
+    DEFAULT_STALE_AFTER,
+    Heading,
+    estimate_headings,
+)
 from .influx import InfluxWriter, load_config, mirror
 from .store import Store, cache_files, default_db_path
 
@@ -281,8 +286,9 @@ HEADING_DESCRIPTION = (
     "positions. One tab-separated line per tracker: id, heading in degrees "
     "clockwise from true north, state, source, when it last moved (UTC) and "
     "for how many seconds it has been parked.\n\n"
-    "STATE is the confidence flag. 'moving': the latest fix has speed > 0 and "
-    "the heading is its GPS course. 'freshly_parked': the vehicle is "
+    "STATE is the confidence flag. 'moving': the latest fix is at or above "
+    "--min-speed (a slower fix is GPS jitter at a standstill) and the heading "
+    "is its GPS course. 'freshly_parked': the vehicle is "
     "stationary and last moved within --stale-after seconds; the heading is "
     "the direction it was travelling as it came to rest. 'stale': the same "
     "estimate, but the last movement is older than --stale-after. 'unknown': "
@@ -480,12 +486,14 @@ def cmd_heading(args: argparse.Namespace) -> int:
     """
     if args.stale_after < 0:
         raise TrackiwiError("--stale-after must be zero or more seconds")
+    if args.min_speed < 0:
+        raise TrackiwiError("--min-speed must be zero or more km/h")
     if default_db_path().exists():
         with Store() as store:
             rows = store.query(tracker_id=args.tracker)
     else:
         rows = []
-    headings = estimate_headings(rows, stale_after=args.stale_after)
+    headings = estimate_headings(rows, stale_after=args.stale_after, min_speed=args.min_speed)
     if args.tracker is not None and args.tracker not in headings:
         headings[args.tracker] = Heading(None, "unknown", "none", None, None)
     if not headings:
@@ -581,6 +589,14 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="seconds since the last movement after which a parked estimate is "
         f"reported as 'stale' (default {DEFAULT_STALE_AFTER})",
+    )
+    heading.add_argument(
+        "--min-speed",
+        type=float,
+        default=DEFAULT_MIN_MOVING_SPEED,
+        metavar="KMH",
+        help="minimum speed (km/h) that counts as movement; below it a fix is "
+        f"GPS jitter at a standstill (default {DEFAULT_MIN_MOVING_SPEED})",
     )
     heading.set_defaults(func=cmd_heading)
 
