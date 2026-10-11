@@ -61,7 +61,6 @@ Verifying tests
 
    ``tests/test_client_sync.py::test_default_opener_never_follows_redirects``,
    ``tests/test_client_sync.py::test_a_redirect_is_not_read_as_no_more_data``,
-   ``tests/test_client_sync.py::test_a_redirect_is_not_a_valid_session``,
    ``tests/test_influx_writer.py::test_default_opener_never_follows_redirects``
 
 .. test:: The app-command response header is ignored
@@ -148,9 +147,11 @@ Verifying tests
    :id: TEST_EXPORT_ATOMIC
    :verifies: REQ_EXPORT_ATOMIC
 
-   ``tests/test_cli.py::test_export_to_existing_file_preserves_mode``,
+   ``tests/test_cli.py::test_export_to_existing_file_keeps_only_owner_bits``,
    ``tests/test_cli.py::test_export_to_new_file_creates_mode_0600``,
-   ``tests/test_cli.py::test_export_to_symlink_follows_and_preserves_symlink``
+   ``tests/test_cli.py::test_export_to_a_symlink_is_refused``,
+   ``tests/test_cli.py::test_export_write_failure_does_not_clobber_a_previous_export``,
+   ``tests/test_cli.py::test_export_leaves_no_tmp_file_on_keyboard_interrupt``
 
 .. test:: A multi-tracker export keeps trackers separate
    :id: TEST_EXPORT_PER_TRACKER
