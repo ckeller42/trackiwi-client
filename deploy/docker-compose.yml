@@ -1,6 +1,6 @@
 # Turnkey stack: InfluxDB 2 + Grafana + trackiwi ingest. Setup, in order
 # (README "Option A" has the full walk-through):
-#   cp deploy/example.env deploy/.env      # then replace every changeme value
+#   install -m 600 deploy/example.env deploy/.env   # owner-only; replace every changeme value
 #   docker compose -f deploy/docker-compose.yml up -d influxdb
 #   ... create the scoped ingest token (README), put it in deploy/.env ...
 #   docker compose -f deploy/docker-compose.yml run --rm ingest trackiwi login

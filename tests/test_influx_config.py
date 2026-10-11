@@ -66,6 +66,17 @@ def test_missing_url_names_the_key_and_file(tmp_path):
         load_config(tmp_path / "missing.toml", env={})
 
 
+def test_http_to_a_remote_host_warns_but_local_and_https_do_not(tmp_path, capsys):
+    # http to a non-local host leaks the token and history in the clear (#26).
+    load_config(
+        tmp_path / "missing.toml", env={"TRACKIWI_INFLUX_URL": "http://influx.example:8086"}
+    )
+    assert "unencrypted" in capsys.readouterr().err
+    for safe in ("http://localhost:8086", "http://127.0.0.1:8086", "https://influx.example:8086"):
+        load_config(tmp_path / "missing.toml", env={"TRACKIWI_INFLUX_URL": safe})
+        assert capsys.readouterr().err == ""
+
+
 def test_a_url_without_a_scheme_is_rejected(tmp_path):
     # Without this, Request() raises a raw ValueError outside the try (#19).
     for bad in ("influx.local", "influx.local:8086", "ftp://h", "://h"):
@@ -96,6 +107,15 @@ def test_token_file_is_read_and_trailing_newline_stripped(tmp_path):
     token_file = _write(tmp_path / "influx.token", "tok-from-file\n")
     path = _write(tmp_path / "influx.toml", f'url = "http://h"\ntoken_file = "{token_file}"\n')
     assert load_config(path, env={}).token == "tok-from-file"
+
+
+def test_token_file_is_self_healed_to_0600(tmp_path):
+    # A token_file (or a .env from the template) is otherwise left world-readable (#40).
+    token_file = _write(tmp_path / "influx.token", "tok-from-file\n")
+    os.chmod(token_file, 0o644)
+    path = _write(tmp_path / "influx.toml", f'url = "http://h"\ntoken_file = "{token_file}"\n')
+    load_config(path, env={})
+    assert stat.S_IMODE(os.stat(token_file).st_mode) == 0o600
 
 
 def test_token_env_wins_over_token_file(tmp_path):

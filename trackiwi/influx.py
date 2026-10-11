@@ -90,12 +90,20 @@ def _read_file(path: Path) -> dict[str, Any]:
 
 
 def _read_secret(path_text: str, what: str) -> str:
-    """Read a secret from a file, stripping surrounding whitespace."""
+    """Read a secret from a file, stripping surrounding whitespace.
+
+    Self-heals the file to 0600, as the session and config files do: a
+    ``token_file``/``password_file`` (or a ``.env`` copied from the template)
+    is otherwise left at the umask default, usually world-readable (#40).
+    """
     path = Path(path_text).expanduser()
     try:
-        return path.read_text(encoding="utf-8").strip()
+        secret = path.read_text(encoding="utf-8").strip()
     except OSError as error:
         raise TrackiwiError(f"cannot read {what} file {path}: {error.strerror}") from error
+    with contextlib.suppress(OSError):
+        os.chmod(path, 0o600)
+    return secret
 
 
 def _parse_version(raw: Any) -> int | None:
@@ -131,6 +139,13 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
         # Without this, a scheme-less value reaches Request() as a raw
         # ValueError outside the request's try (#19).
         raise TrackiwiError(f"InfluxDB 'url' must be an http(s) URL with a host, got {url!r}")
+    if parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS:
+        # http to a non-local host sends the token and history in the clear (#26).
+        print(
+            f"warning: InfluxDB url {url!r} is plain http to a non-local host; "
+            "the token and position history travel unencrypted — use https",
+            file=sys.stderr,
+        )
     token_env = str(merged.get("token_env") or DEFAULT_TOKEN_ENV)
     token = env.get(token_env) or None
     if token is None and merged.get("token_file"):
@@ -158,6 +173,7 @@ def load_config(path: Path | None = None, env: Mapping[str, str] | None = None) 
 
 WRITE_TIMEOUT = 60
 _RETENTION_DROP = b"beyond retention policy"
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "influxdb"})
 
 
 def _as_object(body: bytes) -> dict[str, Any] | None:
@@ -184,7 +200,7 @@ class InfluxWriter:
 
     def __init__(self, config: InfluxConfig, opener: Callable[..., Any] | None = None) -> None:
         self.config = config
-        self.opener = opener or _http.no_redirect_opener().open
+        self.opener = opener or _http.no_redirect_opener(proxy=False).open
         self._version = config.version
         self._secrets = (config.token, config.password)
 

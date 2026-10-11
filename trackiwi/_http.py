@@ -53,12 +53,19 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def no_redirect_opener() -> urllib.request.OpenerDirector:
+def no_redirect_opener(*, proxy: bool = True) -> urllib.request.OpenerDirector:
     """A fresh opener that never follows redirects (one per client or writer).
 
-    Implements :need:`REQ_NO_REDIRECTS`.
+    Implements :need:`REQ_NO_REDIRECTS`. With ``proxy=False`` an empty
+    `ProxyHandler` is installed so the opener ignores ``HTTP_PROXY`` and friends
+    — the InfluxDB writer uses this so a token and the gzip'd history can never
+    be sent, in cleartext over plain http, to an environment-injected proxy on
+    a third host (#26). The trackiwi client keeps ``proxy=True``: its base is
+    always https and a proxied user needs the proxy to reach the cloud.
     """
-    return urllib.request.build_opener(_NoRedirect)
+    if proxy:
+        return urllib.request.build_opener(_NoRedirect)
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 def read_error_body(error: urllib.error.HTTPError) -> bytes:
