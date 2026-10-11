@@ -284,6 +284,22 @@ def test_ingest_sync_and_push_both_failing_keeps_the_sync_exit_code(env, monkeyp
     assert "authentication required" in err
 
 
+def test_ingest_with_only_the_push_failing_exits_one(env, monkeypatch, capsys):
+    """Sync and names OK, InfluxDB down (the home stack restarting) — the most
+    likely real failure. The push failure alone decides the exit code (#42)."""
+    monkeypatch.setattr(
+        "trackiwi.cli.Client",
+        _stub_client(batches=[([_row(1)], 0, 1)], trackers=[{"id": 7, "name": "Bus"}]),
+    )
+
+    def refuse(self, lines):
+        raise TrackiwiError("InfluxDB write failed (HTTP 503)")
+
+    monkeypatch.setattr(FakeWriter, "write", refuse)
+    assert cli.main(["ingest"]) == 1
+    assert "InfluxDB write failed (HTTP 503)" in capsys.readouterr().err
+
+
 # --- A sync timeout still lets the push run (final review I2) ---------------
 
 
