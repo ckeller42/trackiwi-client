@@ -371,7 +371,9 @@ class InfluxWriter:
         first = results[0] if results and isinstance(results[0], dict) else {}
         if first.get("error"):
             # A 200 body can still carry a per-statement error (e.g. auth).
-            return False, [*lines, f"database lookup rejected: {first['error']}"]
+            # Redact like the non-200 branches: server text can echo a secret.
+            detail = _http.redact(str(first["error"])[:200], *self._secrets)
+            return False, [*lines, f"database lookup rejected: {detail}"]
         series = first.get("series") or [{}]
         first_series = series[0] if series and isinstance(series[0], dict) else {}
         names = {row[0] for row in first_series.get("values") or [] if row}
