@@ -29,6 +29,18 @@ from .export import by_tracker
 #: it stays a parameter.
 DEFAULT_STALE_AFTER = 3600
 
+#: Minimum ``speed`` (km/h) that counts as movement. Below it a fix is GPS
+#: jitter at a standstill, whose ``speed`` is non-zero and ``course`` is noise.
+#: A judgement call, so it stays a parameter like `DEFAULT_STALE_AFTER`.
+DEFAULT_MIN_MOVING_SPEED = 2.0
+
+#: The bearing pair must be two moving fixes no further apart than this (s) and
+#: at least `_MIN_SEPARATION_M` apart; otherwise the pair is not one continuous
+#: approach and the last moving fix's ``course`` is used instead (#23).
+_MAX_BEARING_GAP = 600
+_MIN_SEPARATION_M = 5.0
+_EARTH_RADIUS_M = 6_371_000.0
+
 State = Literal["moving", "freshly_parked", "stale", "unknown"]
 Source = Literal["course", "bearing", "none"]
 
@@ -40,8 +52,9 @@ class Heading:
     ``degrees`` is clockwise from true north in ``[0, 360)``, or ``None`` when
     nothing supports an estimate. ``state`` is the confidence flag:
 
-    - ``moving``: the last fix has ``speed > 0``; the heading is that fix's
-      ``course`` (GPS course-over-ground, reliable while moving).
+    - ``moving``: the last fix is at or above ``min_speed`` (a slower fix is
+      GPS jitter at a standstill); the heading is that fix's ``course`` (GPS
+      course-over-ground, reliable while moving).
     - ``freshly_parked``: the last fix is stationary and the last movement was
       no more than ``stale_after`` seconds ago; the heading is the direction
       of approach as the vehicle came to rest.
@@ -56,8 +69,8 @@ class Heading:
     parked, because raw ``course`` is noisy at low speed), ``course`` is the
     raw field, ``none`` goes with ``degrees is None``.
 
-    ``moved_at`` is the ``fix_at`` (epoch seconds) of the last fix with
-    ``speed > 0``; ``parked_for`` is how many seconds ago that was, and is
+    ``moved_at`` is the ``fix_at`` (epoch seconds) of the last fix at or above
+    ``min_speed``; ``parked_for`` is how many seconds ago that was, and is
     ``None`` while moving or unknown.
     """
 
@@ -96,10 +109,15 @@ def initial_bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return 0.0 if bearing >= 360.0 else bearing
 
 
-def _is_moving(row: Row) -> bool:
-    """True for a fix whose ``speed`` is a positive number (``None`` is not)."""
+def _is_moving(row: Row, min_speed: float = DEFAULT_MIN_MOVING_SPEED) -> bool:
+    """True for a fix whose ``speed`` is at least ``min_speed`` (``None`` is not).
+
+    A standstill reports a small non-zero ``speed`` from GPS jitter, so ``> 0``
+    is not enough: it made a parked vehicle read as ``moving`` with the raw,
+    unreliable ``course`` at ~zero speed (#23).
+    """
     speed = row["speed"]
-    return speed is not None and speed > 0
+    return speed is not None and speed >= min_speed
 
 
 def _course(row: Row) -> tuple[float | None, Source]:
@@ -124,11 +142,31 @@ def _bearing_between(earlier: Row, later: Row) -> float | None:
     return initial_bearing(*points)
 
 
+def _distance_m(earlier: Row, later: Row) -> float:
+    """Great-circle distance in metres between two fixes (haversine)."""
+    lat1, lat2 = math.radians(earlier["latitude"]), math.radians(later["latitude"])
+    dlat = lat2 - lat1
+    dlon = math.radians(later["longitude"] - earlier["longitude"])
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * _EARTH_RADIUS_M * math.asin(math.sqrt(a))
+
+
 def _approach(moving: Sequence[Row]) -> tuple[float | None, Source]:
-    """Heading from the last moving fixes: their bearing, else the last ``course``."""
+    """Heading from the last two moving fixes: their bearing, else the last ``course``.
+
+    The pair must be close in time (``_MAX_BEARING_GAP``) and far enough apart
+    in space (``_MIN_SEPARATION_M``); otherwise it is not one continuous
+    approach and the bearing would be noise, so the raw ``course`` is used (#23).
+    """
     if len(moving) >= 2:
-        bearing = _bearing_between(moving[-2], moving[-1])
-        if bearing is not None:
+        earlier, later = moving[-2], moving[-1]
+        gap = int(later["fix_at"]) - int(earlier["fix_at"])
+        bearing = _bearing_between(earlier, later)
+        if (
+            bearing is not None
+            and gap <= _MAX_BEARING_GAP
+            and _distance_m(earlier, later) >= _MIN_SEPARATION_M
+        ):
             return bearing, "bearing"
     return _course(moving[-1])
 
@@ -138,6 +176,7 @@ def estimate_heading(
     *,
     now: int | None = None,
     stale_after: int = DEFAULT_STALE_AFTER,
+    min_speed: float = DEFAULT_MIN_MOVING_SPEED,
 ) -> Heading:
     """Estimate one tracker's heading from its time-ordered position rows.
 
@@ -170,10 +209,10 @@ def estimate_heading(
     if not rows:
         return Heading(None, "unknown", "none", None, None)
     last = rows[-1]
-    if _is_moving(last):
+    if _is_moving(last, min_speed):
         degrees, source = _course(last)
         return Heading(degrees, "moving", source, int(last["fix_at"]), None)
-    moving = [row for row in rows if _is_moving(row)]
+    moving = [row for row in rows if _is_moving(row, min_speed)]
     if not moving:
         return Heading(None, "unknown", "none", None, None)
     degrees, source = _approach(moving)
@@ -188,6 +227,7 @@ def estimate_headings(
     *,
     now: int | None = None,
     stale_after: int = DEFAULT_STALE_AFTER,
+    min_speed: float = DEFAULT_MIN_MOVING_SPEED,
 ) -> dict[Any, Heading]:
     """Estimate every tracker's heading from mixed, time-ordered rows.
 
@@ -206,6 +246,8 @@ def estimate_headings(
     {1: 'moving', 2: 'unknown'}
     """
     return {
-        tracker_id: estimate_heading(tracker_rows, now=now, stale_after=stale_after)
+        tracker_id: estimate_heading(
+            tracker_rows, now=now, stale_after=stale_after, min_speed=min_speed
+        )
         for tracker_id, tracker_rows in by_tracker(rows).items()
     }

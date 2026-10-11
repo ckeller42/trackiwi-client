@@ -18,7 +18,7 @@
 | `shares` | API | nothing | List active share links: id, name (field names unverified). Cannot create or revoke one. Not cached. |
 | `sync [--full]` | API | cache | Fetch new positions into the cache; `--full` restarts from the beginning. |
 | `export --format F [--from D] [--to D] [--tracker N] [-o PATH]` | cache | stdout or file | Export cached positions. See [export formats](exports.md). |
-| `heading [--tracker N] [--stale-after SECONDS]` | cache | nothing | Estimate each vehicle's heading from the cache. Offline. Default `--stale-after` 3600. |
+| `heading [--tracker N] [--stale-after SECONDS] [--min-speed KMH]` | cache | nothing | Estimate each vehicle's heading from the cache. Offline. Defaults: `--stale-after` 3600, `--min-speed` 2 (a slower fix is GPS jitter). |
 | `influx check` | InfluxDB | nothing | Probe the configured InfluxDB target: connectivity, version, auth, bucket. |
 | `influx push` | cache | InfluxDB, `mirror_state` | Send cached positions not yet mirrored. |
 | `ingest` | API, cache | cache, InfluxDB | `sync`, refresh tracker names, then `influx push`. What the timer runs. |

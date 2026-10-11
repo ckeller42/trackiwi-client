@@ -228,12 +228,13 @@ Heading
    :tags: heading, safety
 
    The heading helper is pure arithmetic over cached positions: no request is
-   made and the cache is never created by it. Moving (``speed > 0``): the
-   heading is the fix's ``course``. Parked: the heading is the initial
-   great-circle bearing between the last two moving fixes of the *same*
-   tracker, in ``[0, 360)`` and correct across the antimeridian; only when
-   that bearing is undefined (one moving fix, or two at the same spot) the
-   last moving fix's raw ``course`` is used. No moving fix at all yields
+   made and the cache is never created by it. Moving (at or above
+   ``min_speed``, so GPS jitter at a standstill does not count): the heading
+   is the fix's ``course``. Parked: the heading is the initial great-circle
+   bearing between the last two moving fixes of the *same* tracker, in
+   ``[0, 360)`` and correct across the antimeridian; only when that bearing is
+   undefined (one moving fix, two at the same spot, or a pair too far apart in
+   time or space) the last moving fix's raw ``course`` is used. No moving fix at all yields
    ``unknown``, never an error, and a NULL or non-finite cached field never
    raises. The caveats — a vehicle that reversed into its spot points the
    opposite way, and GPS alone cannot sense a stationary heading — are stated

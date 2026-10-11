@@ -162,6 +162,40 @@ def test_two_moving_fixes_at_the_same_spot_fall_back_to_course():
     )
 
 
+def test_low_speed_jitter_is_not_treated_as_movement():
+    """A parked vehicle's GPS jitter (small non-zero speed) must not read as
+    'moving' with its raw course, nor seed a bogus bearing pair (#23)."""
+    rows = DRIVE + [
+        fix(NOW - 120, 31.002, -40.999, 0.0, 187),
+        fix(NOW - 30, 31.0021, -40.9991, 0.4, 233),  # jitter two minutes after parking
+    ]
+    heading = estimate_heading(rows, now=NOW)
+    assert heading.state != "moving"
+    assert heading.degrees != 233.0  # never the raw course at ~zero speed
+    assert heading.source == "bearing"
+    assert heading.moved_at == NOW - 180  # the last real moving fix
+
+
+def test_a_bearing_pair_too_far_apart_in_time_falls_back_to_course():
+    """Two moving fixes separated by a long gap are not one approach (#23)."""
+    rows = [
+        fix(NOW - 100000, 31.0, -41.0, 20.0, 15),
+        fix(NOW - 60, 31.5, -41.5, 20.0, 88),
+        fix(NOW - 30, 31.5, -41.5, 0.0, 200),
+    ]
+    heading = estimate_heading(rows, now=NOW)
+    assert heading.source == "course"
+    assert heading.degrees == 88.0
+
+
+def test_the_minimum_moving_speed_is_tunable():
+    rows = [fix(NOW - 120, 31.0, -41.0, 1.0, 50), fix(NOW - 60, 31.0, -41.0, 0.0, 99)]
+    # Default threshold: a 1.0 km/h fix is jitter, so nothing ever moved.
+    assert estimate_heading(rows, now=NOW).state == "unknown"
+    # Lower it and the same fix counts as movement.
+    assert estimate_heading(rows, now=NOW, min_speed=0.5).state == "freshly_parked"
+
+
 def test_a_non_finite_cached_coordinate_falls_back_to_course_instead_of_raising():
     """Rows cached before parse-time finiteness checks existed must not crash."""
     rows = [
@@ -253,6 +287,14 @@ def test_cli_stale_after_flag_is_honoured(capsys):
     assert "--stale-after" in capsys.readouterr().err
 
 
+def test_cli_min_speed_flag_is_honoured(capsys):
+    seed([fix(NOW - 120, 31.0, -41.0, 1.0, 50)])
+    assert main(["heading", "--min-speed", "5"]) == 0
+    assert capsys.readouterr().out.split("\t")[2] == "unknown"
+    assert main(["heading", "--min-speed", "-1"]) == 1
+    assert "--min-speed" in capsys.readouterr().err
+
+
 def test_cli_tracker_filter_and_unknown_tracker(capsys):
     seed(PARKED)
     assert main(["heading", "--tracker", "7"]) == 0
@@ -282,3 +324,4 @@ def test_cli_help_states_the_caveats(capsys):
     assert "reversed" in text
     assert "estimate" in text
     assert "--stale-after" in text
+    assert "--min-speed" in text
