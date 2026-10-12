@@ -44,10 +44,6 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Note the start time
-        id: start
-        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@cab360f6565aa35a51d6ce9e43f1f4287c0a32ea # v1.0.241
@@ -80,7 +76,9 @@ jobs:
 
       # The action reports success even when Claude posted nothing (#8), so
       # fail unless GitHub shows a comment by claude[bot] on this PR (top-level
-      # or inline) since this job started. Denied tool calls alone do not fail
+      # or inline). Any time, not just this run: the code-review plugin stops
+      # by design when it has already commented, so every later push to a
+      # reviewed PR posts nothing (#91). Denied tool calls alone do not fail
       # it: Claude sometimes tries a piped or `git fetch` command the allowlist
       # blocks on purpose and then reviews anyway (#81, #82, #86), so denials
       # are listed as a warning.
@@ -91,7 +89,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
-          SINCE: ${{ steps.start.outputs.at }}
         run: |
           set -euo pipefail
           if [ -z "$EXECUTION_FILE" ] || [ ! -f "$EXECUTION_FILE" ]; then
@@ -115,12 +112,12 @@ jobs:
           fi
           posted=0
           for ep in "issues/$PR/comments" "pulls/$PR/comments"; do
-            n=$(gh api --paginate "repos/$REPO/$ep?since=$SINCE" \
+            n=$(gh api --paginate "repos/$REPO/$ep" \
               --jq '[.[] | select(.user.login == "claude[bot]")] | length' | awk '{s+=$1} END {print s+0}')
             posted=$((posted + n))
           done
           if [ "$posted" -eq 0 ]; then
-            echo "::error::Claude finished without posting a review ($count denied call(s) above)."
+            echo "::error::Claude finished and this PR has no review by claude[bot] ($count denied call(s) above)."
             exit 1
           fi
           echo "review posted ($posted comment(s) by claude[bot]), denials: $count"
