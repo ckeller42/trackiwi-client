@@ -337,16 +337,21 @@ def _sync_into_cache(client: Client, full: bool) -> None:
         offset = None if full else store.max_id()
         # `fetched` is comparable with the server's total; `written` is new rows only.
         fetched = written = skipped_total = 0
+        # Only on a terminal: under the systemd timer stderr is the journal,
+        # which stores a \r line as "[blob data]".
+        progress = sys.stderr.isatty()
         try:
             for rows, skipped, total in client.sync(offset=offset):
                 written += store.upsert(rows)
                 fetched += len(rows)
                 skipped_total += skipped
                 suffix = f" of {total}" if total else ""
-                print(f"\rsynced {fetched}{suffix} positions", end="", file=sys.stderr)
+                if progress:
+                    print(f"\rsynced {fetched}{suffix} positions", end="", file=sys.stderr)
         finally:
             # Close the \r-progress line so later messages start clean.
-            print(file=sys.stderr)
+            if progress:
+                print(file=sys.stderr)
         if skipped_total:
             print(f"skipped {skipped_total} malformed rows", file=sys.stderr)
         print(f"{written} new positions, {store.count()} cached in total")

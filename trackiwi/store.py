@@ -202,9 +202,19 @@ class Store:
         could otherwise change a point the mirror has already sent. The
         inserted count comes straight from ``cursor.rowcount`` (a row that
         violates a constraint is ignored, not stored, and not counted).
+
+        Implements :need:`REQ_CACHE_NO_RESENT_FIX`: a row matching a cached
+        fix (tracker, time, place) under another id is ignored too; the
+        ``(tracker_id, fix_at)`` index keeps that lookup cheap.
         """
-        placeholders = ",".join("?" * len(COLUMNS))
-        sql = f"INSERT OR IGNORE INTO positions ({','.join(COLUMNS)}) VALUES ({placeholders})"
+        new_row = ", ".join(f"? AS {column}" for column in COLUMNS)
+        sql = (
+            f"INSERT OR IGNORE INTO positions ({','.join(COLUMNS)}) "
+            f"SELECT * FROM (SELECT {new_row}) AS new WHERE NOT EXISTS ("
+            "SELECT 1 FROM positions AS p WHERE p.tracker_id = new.tracker_id "
+            "AND p.fix_at = new.fix_at AND p.latitude = new.latitude "
+            "AND p.longitude = new.longitude)"
+        )
         cursor = self.conn.executemany(sql, list(rows))
         self.conn.commit()
         return cursor.rowcount

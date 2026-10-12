@@ -8,7 +8,10 @@ import pytest
 from trackiwi.store import Store, default_db_path
 
 
-def row(pos_id, tracker_id=7, fix_at=1758000000, lat=31.0, lon=-41.0):
+def row(pos_id, tracker_id=7, fix_at=None, lat=31.0, lon=-41.0):
+    # One distinct fix per id unless a test pins `fix_at`: the cache treats the
+    # same tracker, time and place as one fix (REQ_CACHE_NO_RESENT_FIX).
+    fix_at = 1758000000 + pos_id if fix_at is None else fix_at
     return (pos_id, tracker_id, fix_at, 120, lat, lon, 12, 0.0, 0, 0, -71, 9, 98, 4120)
 
 
@@ -36,6 +39,17 @@ def test_upsert_is_idempotent(store):
     store.upsert([row(1)])
     store.upsert([row(1)])
     assert store.count() == 1
+
+
+def test_upsert_ignores_a_fix_resent_under_a_new_id(store):
+    """The server once re-sent a batch under new ids (10 rows on 2026-05-14,
+    one with a different `distance`). Same tracker, time and place is the same
+    fix, so the copy is neither stored, exported nor mirrored; a different
+    place at the same second (a move and a stop fix) is still kept."""
+    assert store.upsert([row(1, fix_at=100)]) == 1
+    assert store.upsert([row(2, fix_at=100)]) == 0
+    assert store.upsert([row(3, fix_at=100, lat=31.5)]) == 1
+    assert [r["id"] for r in store.query()] == [1, 3]
 
 
 def test_max_id_is_the_sync_offset(store):
