@@ -116,8 +116,13 @@ jobs:
               --jq '[.[] | select(.user.login == "claude[bot]")] | length' | awk '{s+=$1} END {print s+0}')
             posted=$((posted + n))
           done
-          if [ "$posted" -eq 0 ]; then
+          if [ "$posted" -eq 0 ] && [ "$count" -gt 0 ]; then
             echo "::error::Claude finished and this PR has no review by claude[bot] ($count denied call(s) above)."
             exit 1
+          fi
+          if [ "$posted" -eq 0 ]; then
+            # The plugin's eligibility check skips a PR it judges "very simple and obviously ok".
+            echo "::warning::No review by claude[bot] and no denied calls: the plugin judged this PR not to need one."
+            exit 0
           fi
           echo "review posted ($posted comment(s) by claude[bot]), denials: $count"
