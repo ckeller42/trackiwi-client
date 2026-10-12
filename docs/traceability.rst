@@ -129,6 +129,12 @@ Verifying tests
    ``tests/test_store.py::test_database_is_created_owner_only_without_relying_on_chmod``,
    ``tests/test_store.py::test_permissions_are_self_healed``
 
+.. test:: A fix re-sent under a new id is ignored
+   :id: TEST_CACHE_NO_RESENT_FIX
+   :verifies: REQ_CACHE_NO_RESENT_FIX
+
+   ``tests/test_store.py::test_upsert_ignores_a_fix_resent_under_a_new_id``
+
 .. test:: Purge deletes the cache and sidecars, even when corrupt
    :id: TEST_PURGE_DELETES
    :verifies: REQ_PURGE_DELETES

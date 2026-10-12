@@ -153,6 +153,14 @@ Local cache & config
    The position cache is created at mode 0600 inside a 0700 directory, and a
    widened mode self-heals on open. (Design spec §7.1.)
 
+.. req:: A fix re-sent under a new id is not cached twice
+   :id: REQ_CACHE_NO_RESENT_FIX
+   :tags: storage
+
+   A row with the same tracker, ``fix_at``, latitude and longitude as a cached
+   row is ignored, whatever its id: the server once re-sent a batch under new
+   ids, which duplicated points in exports and overwrote InfluxDB points.
+
 .. req:: Purge deletes the cache even when corrupt
    :id: REQ_PURGE_DELETES
    :tags: storage, privacy

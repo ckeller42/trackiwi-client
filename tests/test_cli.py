@@ -253,6 +253,7 @@ def test_sync_with_only_malformed_rows_reports_them_and_succeeds(capsys, monkeyp
 
 def test_sync_does_not_report_refetched_rows_as_new(capsys, monkeypatch):
     seed_cache()
+    monkeypatch.setattr("sys.stderr.isatty", lambda: True)
     batch = ([row(1), row(2, fix_at=1758000060)], 0, 2)
     monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client([batch]))
 
@@ -288,6 +289,7 @@ def test_sync_failure_still_terminates_the_progress_line(monkeypatch, capsys):
     error text, on success or failure, so the two never run together."""
     from trackiwi.client import TrackiwiError as ClientTrackiwiError
 
+    monkeypatch.setattr("sys.stderr.isatty", lambda: True)
     monkeypatch.setattr(
         "trackiwi.cli.Client",
         make_stub_sync_client([([row(1)], 0, None), ClientTrackiwiError("boom mid-sync")]),
@@ -629,6 +631,22 @@ def test_logout_with_an_unloadable_config_still_removes_the_credentials(raw, cap
     assert "Traceback" not in err
 
 
+def test_sync_writes_no_progress_line_when_stderr_is_not_a_terminal(monkeypatch, capsys):
+    """Under the systemd timer stderr is the journal, which stored the
+    ``\\rsynced ...`` line as "[30B blob data]" (control character), and the
+    closing newline as an empty message. Off a terminal: no progress at all;
+    the summary on stdout says what happened."""
+    seed_cache()
+    batch = ([row(3, fix_at=1758000120)], 0, 3)
+    monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client([batch]))
+
+    assert main(["sync"]) == 0
+
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert "1 new positions, 3 cached in total" in out
+
+
 # --- N-3: a partial sync must not report success ---
 
 
@@ -643,6 +661,10 @@ def test_sync_with_a_dead_stderr_does_not_report_success(monkeypatch):
     monkeypatch.setattr("trackiwi.cli.Client", make_stub_sync_client(batches))
 
     class DeadStderr(io.StringIO):
+        # A terminal, or the progress line (the write that dies) is skipped.
+        def isatty(self):
+            return True
+
         def write(self, text):
             raise BrokenPipeError(32, "Broken pipe")
 
